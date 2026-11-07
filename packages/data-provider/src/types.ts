@@ -153,6 +153,12 @@ export type TPayload = Partial<TMessage> &
     messages?: TMessages;
     isTemporary: boolean;
     ephemeralAgent?: TEphemeralAgent | null;
+    /**
+     * True only when this page displayed Hindsight memory as On for the chat
+     * (server-confirmed, or the new chat's own choice). The server can only
+     * narrow consent with it, never widen it.
+     */
+    hindsightMemory?: boolean;
     editedContent?: TEditedContent | null;
     /** Added conversation for multi-convo feature */
     addedConvo?: TConversation;
@@ -217,6 +223,8 @@ export type TSubmission = {
   endpointOption: TEndpointOption;
   clientTimestamp?: string;
   ephemeralAgent?: TEphemeralAgent | null;
+  /** See `TPayload.hindsightMemory`. */
+  hindsightMemory?: boolean;
   editedContent?: TEditedContent | null;
   /**
    * Length of the retained content prefix for an edited resubmission, captured
@@ -1100,3 +1108,8 @@ export type TLangfuseSessionLinkResponse = {
   /** Opaque identity of the project `url` opens, so a caller can tell whether it holds what it showed. */
   destinationId?: string;
 };
+
+/** Hindsight per-conversation memory: the owner's availability and a chat's consent. */
+export type THindsightAvailability = { available: boolean };
+export type THindsightConsent = { available: boolean; enabled: boolean };
+export type THindsightConsentUpdate = { enabled: boolean };

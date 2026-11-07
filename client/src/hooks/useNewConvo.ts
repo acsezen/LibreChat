@@ -1,4 +1,5 @@
 import { useCallback } from 'react';
+import { useSetAtom } from 'jotai';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useGetModelsQuery } from 'librechat-data-provider/react-query';
 import { useRecoilState, useRecoilValue, useSetRecoilState, useRecoilCallback } from 'recoil';
@@ -51,6 +52,7 @@ import { supersedeNavigation } from './Conversations/useNavigateToConvo';
 import useGetConversation from './Conversations/useGetConversation';
 import useAssistantListMap from './Assistants/useAssistantListMap';
 import { clearUploadRecovery } from './Files/useFileHandling';
+import { hindsightDraftAtom } from '~/store/hindsight';
 import { useResetChatBadges } from './useChatBadges';
 import { useApplyModelSpecEffects } from './Agents';
 import { useAgentsMapContext } from '~/Providers';
@@ -84,6 +86,7 @@ const useNewConvo = (index = 0) => {
   const [files, setFiles] = useRecoilState(store.filesByIndex(index));
   const saveBadgesState = useRecoilValue<boolean>(store.saveBadgesState);
   const setSubmission = useSetRecoilState<TSubmission | null>(store.submissionByIndex(index));
+  const setHindsightDraft = useSetAtom(hindsightDraftAtom);
   const { data: endpointsConfig = {} as TEndpointsConfig } = useGetEndpointsQuery();
   const agentsMap = useAgentsMapContext();
 
@@ -348,6 +351,8 @@ const useNewConvo = (index = 0) => {
           !nextConversationId.startsWith('_'));
       if (!keepsExistingDraft) {
         renewNewConversationDraftToken(index);
+        /** Every new chat starts with Hindsight Off; a draft never carries over. */
+        setHindsightDraft(false);
       }
       pauseGlobalAudio();
       if (!saveBadgesState) {
@@ -537,6 +542,7 @@ const useNewConvo = (index = 0) => {
       endpointsConfig,
       getConversation,
       pauseGlobalAudio,
+      setHindsightDraft,
       switchToConversation,
       applyModelSpecEffects,
     ],

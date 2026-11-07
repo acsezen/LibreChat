@@ -2725,6 +2725,32 @@ describe('ResumeAgentController (POST /agents/chat/resume)', () => {
       },
     });
 
+    it('runs Hindsight finalization after the resumed response is durably saved', async () => {
+      const hindsightMemory = require('~/server/services/HindsightMemory');
+      const finalize = jest.spyOn(hindsightMemory, 'finalize').mockResolvedValue(undefined);
+      mockSaveMessage.mockImplementation(async (_context, message) => message);
+      try {
+        mockGenerationJobManager.getJob.mockResolvedValue(makeToolApprovalJob());
+        expect((await post(approveBody())).status).toBe(200);
+        await settled;
+        await flush();
+        expect(finalize).toHaveBeenCalledWith(
+          expect.objectContaining({
+            user: expect.objectContaining({ id: USER_ID }),
+            temporary: false,
+          }),
+          expect.objectContaining({ messageId: USER_MSG_ID }),
+          expect.objectContaining({ messageId: RESPONSE_MSG_ID, parentMessageId: USER_MSG_ID }),
+          expect.objectContaining({ unfinished: false, compaction: false, userMetadata: true }),
+        );
+        expect(mockSaveMessage.mock.invocationCallOrder[0]).toBeLessThan(
+          finalize.mock.invocationCallOrder[0],
+        );
+      } finally {
+        finalize.mockRestore();
+      }
+    });
+
     it('resumes when the rebuilt stateful code target matches the paused approval', async () => {
       const agent = statefulCodeAgent('worker-a');
       const codeExecutionBinding = captureCodeExecutionApprovalBinding([agent]);
@@ -4376,6 +4402,153 @@ describe('ResumeAgentController (POST /agents/chat/resume)', () => {
       expect(mockJobStore.updateJob).not.toHaveBeenCalled();
       expect(mockDeleteAgentCheckpoint).not.toHaveBeenCalled();
       expect(mockDecrementPendingRequest).toHaveBeenCalledWith(USER_ID);
+    });
+  });
+
+  /**
+   * Resume through the REAL resume.js controller and the REAL Hindsight adapter
+   * (consent store on mongodb-memory-server, real outbox). The recorded turn
+   * decision is the only consent input; initialize.js is represented by its
+   * one-line `bindAgent` call.
+   */
+  describe('per-conversation Hindsight consent on resume', () => {
+    const os = require('node:os');
+    const fsp = require('node:fs/promises');
+    const path = require('node:path');
+    const mongoose = require('mongoose');
+    const { MongoMemoryServer } = require('mongodb-memory-server');
+    const hindsightMemory = require('~/server/services/HindsightMemory');
+
+    const KEY_ENV = 'HINDSIGHT_RESUME_SPEC_API_KEY';
+    let mongoServer;
+    let outboxDir;
+
+    beforeAll(async () => {
+      process.env[KEY_ENV] = 'synthetic-resume-spec-token';
+      mongoServer = await MongoMemoryServer.create();
+      await mongoose.connect(mongoServer.getUri());
+    }, 60000);
+
+    afterAll(async () => {
+      await hindsightMemory.close();
+      await mongoose.disconnect();
+      await mongoServer.stop();
+      delete process.env[KEY_ENV];
+    });
+
+    beforeEach(async () => {
+      await hindsightMemory.close();
+      await mongoose.connection.dropDatabase();
+      outboxDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'hindsight-resume-'));
+      requestConfigOverrides = {
+        config: {
+          hindsight: {
+            enabled: true,
+            /** Unroutable: resume capture only queues; it never retrieves. */
+            baseUrl: 'http://127.0.0.1:9',
+            bankId: 'private',
+            ownerUserId: USER_ID,
+            outboxDir,
+            apiKeyEnv: KEY_ENV,
+            pollIntervalMs: 60000,
+            requestTimeoutMs: 200,
+          },
+        },
+      };
+      mockSaveMessage.mockImplementation(async (_context, message) => message);
+      /** request.js records the paused user message with its conversation (request.js userMessage metadata). */
+      mockGenerationJobManager.getJob.mockResolvedValue(
+        makeToolApprovalJob({
+          metadata: {
+            userMessage: {
+              messageId: USER_MSG_ID,
+              parentMessageId: THREAD_PARENT_ID,
+              conversationId: CONVO_ID,
+              text: 'please run the tool',
+            },
+          },
+        }),
+      );
+    });
+
+    afterEach(async () => {
+      await hindsightMemory.close();
+      await fsp.rm(outboxDir, { recursive: true, force: true });
+    });
+
+    const db = () => mongoose.connection.db;
+    async function pendingJobs() {
+      try {
+        return (await fsp.readdir(path.join(outboxDir, 'pending'))).length;
+      } catch {
+        return 0;
+      }
+    }
+
+    /** Seed what request.js recorded when the paused turn started. */
+    async function recordPausedTurn({ enabled = true, capableAgentIds = [AGENT_ID] } = {}) {
+      await db().collection('hindsightconsents').insertOne({
+        user: USER_ID,
+        conversationId: CONVO_ID,
+        enabled: true,
+        version: 1,
+        fence: 1,
+      });
+      await db().collection('hindsightturns').insertOne({
+        user: USER_ID,
+        conversationId: CONVO_ID,
+        generation: '1000',
+        enabled,
+        consentVersion: 1,
+        capableAgentIds,
+      });
+    }
+
+    async function resumeWith(agentTools) {
+      mockInitializeClient.mockImplementation(async ({ req }) => {
+        const primaryConfig = { id: AGENT_ID };
+        hindsightMemory.bindAgent(req, primaryConfig, { tools: agentTools });
+        return { client: makeClient({ options: { agent: primaryConfig } }) };
+      });
+      expect((await post(approveBody())).status).toBe(200);
+      await settled;
+      await flush();
+    }
+
+    it('captures the resumed answer when the paused turn was recorded On', async () => {
+      await recordPausedTurn();
+      await resumeWith(['hindsight']);
+      expect(await pendingJobs()).toBe(1);
+    });
+
+    it.each([
+      ['no recorded decision', async () => {}, ['hindsight']],
+      [
+        'a recorded Off decision',
+        () => recordPausedTurn({ enabled: false, capableAgentIds: [] }),
+        ['hindsight'],
+      ],
+      [
+        'an agent that lost the Hindsight tool during the pause',
+        () => recordPausedTurn(),
+        ['web_search'],
+      ],
+    ])('stays Off for %s', async (_label, seed, agentTools) => {
+      await seed();
+      await resumeWith(agentTools);
+      expect(await pendingJobs()).toBe(0);
+    });
+
+    it('does not capture when the stored consent changed during the pause', async () => {
+      await recordPausedTurn();
+      await db()
+        .collection('hindsightconsents')
+        .updateOne(
+          { conversationId: CONVO_ID },
+          { $set: { enabled: false }, $inc: { version: 1 } },
+        );
+      await resumeWith(['hindsight']);
+      expect(await pendingJobs()).toBe(0);
     });
   });
 });

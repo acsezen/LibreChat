@@ -151,3 +151,24 @@ describe('computeToggleAction — ask_user_question builtin', () => {
     });
   });
 });
+
+describe('computeToggleAction — Hindsight builtin', () => {
+  const item = {
+    kind: 'builtin',
+    id: 'hindsight',
+    iconKey: 'hindsight',
+    name: 'com_ui_hindsight',
+    description: 'com_agents_hindsight_info',
+  } as const;
+
+  test('toggles agent.tools, never a capability field', () => {
+    expect(computeToggleAction(item as never, { selected: false })).toEqual({
+      type: 'tool-add',
+      id: 'hindsight',
+    });
+    expect(computeToggleAction(item as never, { selected: true })).toEqual({
+      type: 'tool-remove',
+      id: 'hindsight',
+    });
+  });
+});

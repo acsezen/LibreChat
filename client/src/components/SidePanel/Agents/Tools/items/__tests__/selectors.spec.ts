@@ -321,3 +321,32 @@ describe('selection — ask_user_question builtin rides agent.tools', () => {
     expect(none.map((i) => i.id)).not.toContain('ask_user_question');
   });
 });
+
+describe('selection — Hindsight builtin rides agent.tools', () => {
+  const catalogWithHindsight: AgentItem[] = [
+    ...sampleCatalog,
+    {
+      kind: 'builtin',
+      id: 'hindsight',
+      name: 'com_ui_hindsight',
+      description: 'com_agents_hindsight_info',
+      iconKey: 'hindsight',
+    },
+  ];
+
+  test('selected iff agent.tools contains the hindsight entry', () => {
+    const selected = deriveSelectedItems(
+      { ...emptyFormState, tools: ['hindsight'] },
+      catalogWithHindsight,
+      [],
+    );
+    expect(selected.map((i) => i.id)).toContain('hindsight');
+
+    const none = deriveSelectedItems(
+      { ...emptyFormState, tools: ['hindsight_recall'] },
+      catalogWithHindsight,
+      [],
+    );
+    expect(none.map((i) => i.id)).not.toContain('hindsight');
+  });
+});

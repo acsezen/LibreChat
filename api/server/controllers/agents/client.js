@@ -224,6 +224,8 @@ const { getAccessibleMCPServers } = require('~/server/services/MCP');
 const BaseClient = require('~/app/clients/BaseClient');
 const { getMCPManager } = require('~/config');
 const db = require('~/models');
+const hindsightMemory = require('~/server/services/HindsightMemory');
+const { DynamicStructuredTool } = require('@librechat/agents/langchain/tools');
 
 const loadAgent = (params) =>
   loadAgentFn(params, {
@@ -2086,7 +2088,13 @@ class AgentClient extends BaseClient {
     if (state?.contextFingerprint == null) {
       return undefined;
     }
-    if (isMemoryAgentEnabled(this.options.req.config?.memory)) {
+    if (
+      isMemoryAgentEnabled(this.options.req.config?.memory) ||
+      hindsightMemory.requiresFreshRun(
+        this.options.req.config?.config?.hindsight,
+        this.options.req.user,
+      )
+    ) {
       return undefined;
     }
     const storedManifest = Array.isArray(state.skillManifest) ? state.skillManifest : [];
@@ -2386,6 +2394,7 @@ class AgentClient extends BaseClient {
     const earlySharedContextPromise = Promise.all([
       this.getSharedMemoryContext(),
       resolveConfigServers(this.options.req),
+      this.getHindsightMemoryContext(orderedMessages),
     ]);
     void earlySharedContextPromise.catch(() => {});
     assertModelBoundContent({
@@ -2852,12 +2861,26 @@ class AgentClient extends BaseClient {
      * Memory context is handled separately and applied per-agent based on config.
      */
     const sharedRunContextParts = [];
-    const [augmentedPrompt, [memories, configServers], agentScopedContext] = await Promise.all([
-      this.contextHandlers?.createContext(),
-      earlySharedContextPromise,
-      agentScopedContextPromise,
-    ]);
+    const [augmentedPrompt, [memories, configServers, hindsightContext], agentScopedContext] =
+      await Promise.all([
+        this.contextHandlers?.createContext(),
+        earlySharedContextPromise,
+        agentScopedContextPromise,
+      ]);
 
+    hindsightMemory.attachTools(
+      this.options.req,
+      allAgents.map(({ agent }) => agent),
+      (definition) => new DynamicStructuredTool(definition),
+      (text) =>
+        assertModelBoundContent({
+          onTraversalFailure: reportLocatorTraversalFailure,
+          filters: this.options.req.config?.filters,
+          legacyPii: this.options.req.config?.messageFilter?.pii,
+          memories: [text],
+        }),
+      this.options.req.config?.endpoints?.agents?.capabilities?.includes(AgentCapabilities.tools),
+    );
     this.retainedAnswers = await retainedAnswersPromise;
     promptTokens += this.retainedAnswers.tokenCount;
 
@@ -3020,6 +3043,14 @@ class AgentClient extends BaseClient {
           agentRunContextParts.push(agentMemoryContext);
         }
       }
+      hindsightMemory.appendAgentContext(
+        this.options.req,
+        agent,
+        hindsightContext,
+        agentRunContextParts,
+        modelBoundMemoryContexts,
+        agentMemoryContexts,
+      );
       if (scopedContext) {
         modelBoundFileContexts.add(scopedContext);
         agentRunContextParts.push(scopedContext);
@@ -3403,6 +3434,20 @@ class AgentClient extends BaseClient {
     return { withKeys, withoutKeys };
   }
 
+  getHindsightMemoryContext(messages = this.currentMessages) {
+    return hindsightMemory.prepare({
+      request: this.options.req,
+      config: this.options.req.config?.config?.hindsight,
+      user: this.options.req.user,
+      query: this.options.req.body?.text,
+      messages,
+      leafId: this.parentMessageId,
+      temporary: hindsightMemory.temporary(this.options.req),
+      compaction: this.isCompactionTurn?.() === true,
+      signal: this.abortController?.signal,
+    });
+  }
+
   /** Reuses the exact memory authorization/load promise for planning and prompt construction. */
   getSharedMemoryContext() {
     this.memoryContextPromise ??= this.useMemory();
@@ -3417,9 +3462,12 @@ class AgentClient extends BaseClient {
    * @returns {Promise<Array<{scope: string, withKeys?: string, withoutKeys?: string}>>}
    */
   async getEventActorMemorySnapshots(agents) {
-    const primary = await this.getSharedMemoryContext();
+    const [primary, hindsight] = await Promise.all([
+      this.getSharedMemoryContext(),
+      this.getHindsightMemoryContext(),
+    ]);
     if (!primary) {
-      return [];
+      return hindsightMemory.snapshots(hindsight, []);
     }
     const userId = this.options.req.user.id + '';
     const primaryScope = getMemoryAgentId(this.options.agent);
@@ -3443,13 +3491,16 @@ class AgentClient extends BaseClient {
         scopes.set(scope, snapshot);
       }),
     );
-    return [...scopes]
-      .map(([scope, snapshot]) => ({
-        scope: scope || 'shared',
-        ...(snapshot.withKeys ? { withKeys: snapshot.withKeys } : {}),
-        ...(snapshot.withoutKeys ? { withoutKeys: snapshot.withoutKeys } : {}),
-      }))
-      .sort((left, right) => left.scope.localeCompare(right.scope));
+    return hindsightMemory.snapshots(
+      hindsight,
+      [...scopes]
+        .map(([scope, snapshot]) => ({
+          scope: scope || 'shared',
+          ...(snapshot.withKeys ? { withKeys: snapshot.withKeys } : {}),
+          ...(snapshot.withoutKeys ? { withoutKeys: snapshot.withoutKeys } : {}),
+        }))
+        .sort((left, right) => left.scope.localeCompare(right.scope)),
+    );
   }
 
   /**

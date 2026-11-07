@@ -8,6 +8,7 @@ import type {
   TMessage,
   TSubmission,
 } from 'librechat-data-provider';
+import { hindsightAcknowledgedAtom } from '~/store/hindsight';
 import { revealedQueuedTurnFamily } from '~/store/steer';
 import useChatFunctions from '../useChatFunctions';
 import { isPasteSubmitted } from '~/utils';
@@ -37,10 +38,20 @@ jest.mock('react-router-dom', () => ({
   useNavigate: () => mockNavigate,
 }));
 
+const mockIsMutating = jest.fn((_filters: unknown) => 0);
+/** Only the Hindsight consent read has state here: a successful, current answer by default. */
+const mockConsentState = {
+  current: { status: 'success', isInvalidated: false } as object | undefined,
+};
+const mockGetQueryState = jest.fn((key: unknown[]) =>
+  key[0] === 'hindsightConsent' ? mockConsentState.current : undefined,
+);
+
 jest.mock('@tanstack/react-query', () => ({
   useQueryClient: () => ({
     getQueryData: mockGetQueryData,
-    getQueryState: jest.fn(() => undefined),
+    getQueryState: (key: unknown[]) => mockGetQueryState(key),
+    isMutating: (filters: unknown) => mockIsMutating(filters),
   }),
 }));
 
@@ -688,5 +699,82 @@ describe('useChatFunctions ask compaction and the composer', () => {
     expect(submission.userMessage.parentMessageId).toBe('a1');
     expect(setFiles).not.toHaveBeenCalled();
     expect(isPasteSubmitted('staged-file')).toBe(false);
+  });
+});
+
+describe('useChatFunctions Hindsight confirmation', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockGetQueryData.mockReturnValue({});
+    mockGetLatestConversation.mockReturnValue(null);
+    mockResolveCodeWorkspaceSubmission.mockReturnValue({});
+  });
+
+  afterEach(() => {
+    getDefaultStore().set(hindsightAcknowledgedAtom, null);
+    mockConsentState.current = { status: 'success', isInvalidated: false };
+  });
+
+  it.each([
+    ['the rendered control shows On for this chat', 'conversation-1', true],
+    ['the control shows On for another chat', 'conversation-2', false],
+    ['no rendered control shows On', null, false],
+  ])('sends hindsightMemory only when %s', (_label, acknowledged, expected) => {
+    getDefaultStore().set(hindsightAcknowledgedAtom, acknowledged);
+    const { result, setSubmission } = renderAsk([]);
+
+    act(() => {
+      result.current.ask({ text: 'What did I decide?', conversationId: 'conversation-1' });
+    });
+
+    const submission = setSubmission.mock.calls.at(-1)?.[0] as TSubmission;
+    expect(submission.hindsightMemory).toBe(expected);
+    expect(createPayload(submission).payload.hindsightMemory).toBe(expected);
+  });
+
+  it('does not send it while a Hindsight change for the chat is still in flight', () => {
+    getDefaultStore().set(hindsightAcknowledgedAtom, 'conversation-1');
+    mockIsMutating.mockReturnValueOnce(1);
+    const { result, setSubmission } = renderAsk([]);
+
+    act(() => {
+      result.current.ask({ text: 'What did I decide?', conversationId: 'conversation-1' });
+    });
+
+    const submission = setSubmission.mock.calls.at(-1)?.[0] as TSubmission;
+    expect(submission.hindsightMemory).toBe(false);
+    expect(mockIsMutating).toHaveBeenCalledWith({
+      mutationKey: ['updateHindsightConsent', 'conversation-1'],
+    });
+  });
+
+  it.each([
+    ['a failed read', { status: 'error', isInvalidated: true }],
+    ['an invalidated read', { status: 'success', isInvalidated: true }],
+    ['no read yet', undefined],
+  ])('does not send it for an existing chat after %s', (_label, state) => {
+    getDefaultStore().set(hindsightAcknowledgedAtom, 'conversation-1');
+    mockConsentState.current = state;
+    const { result, setSubmission } = renderAsk([]);
+
+    act(() => {
+      result.current.ask({ text: 'What did I decide?', conversationId: 'conversation-1' });
+    });
+
+    const submission = setSubmission.mock.calls.at(-1)?.[0] as TSubmission;
+    expect(submission.hindsightMemory).toBe(false);
+  });
+
+  it("sends a new chat's own choice with its first message", () => {
+    const newConversationId = Constants.NEW_CONVO as string;
+    getDefaultStore().set(hindsightAcknowledgedAtom, newConversationId);
+    const { result, setSubmission } = renderAsk(undefined, newConversationId);
+
+    act(() => {
+      result.current.ask({ text: 'Remember this', conversationId: newConversationId });
+    });
+
+    const submission = setSubmission.mock.calls.at(-1)?.[0] as TSubmission;
+    expect(submission.hindsightMemory).toBe(true);
   });
 });

@@ -49,6 +49,9 @@ export const balance = () => `${BASE_URL}/api/balance`;
 export const userPlugins = () => `${BASE_URL}/api/user/plugins`;
 
 export const deleteUser = () => `${BASE_URL}/api/user/delete`;
+export const hindsightAvailability = () => `${BASE_URL}/api/hindsight/availability`;
+export const hindsightConsent = (conversationId: string) =>
+  `${BASE_URL}/api/hindsight/consent/${encodeURIComponent(conversationId)}`;
 export const codeEnvironments = () => `${BASE_URL}/api/code-environments`;
 export const codeEnvironmentPairings = () => `${codeEnvironments()}/pairings`;
 export const codeEnvironmentById = (id: string) =>

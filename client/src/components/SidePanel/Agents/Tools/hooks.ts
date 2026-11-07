@@ -15,7 +15,11 @@ import {
 import type { TSkillSummary } from 'librechat-data-provider';
 import type { AgentForm, ExtendedFile } from '~/common';
 import type { AgentItem } from './items/types';
-import { useVerifyAgentToolAuth, useGetAgentFiles } from '~/data-provider';
+import {
+  useGetAgentFiles,
+  useVerifyAgentToolAuth,
+  useHindsightAvailabilityQuery,
+} from '~/data-provider';
 import { useLocalize, useHasAccess, useHasMemoryAccess } from '~/hooks';
 import { useFileMapContext, useAgentPanelContext } from '~/Providers';
 import { deriveSelectedItems } from './items/selectors';
@@ -176,6 +180,7 @@ export function useAgentItems({
     permission: Permissions.USE,
   });
   const showMemory = useShowMemory();
+  const showHindsight = useHindsightAvailabilityQuery().data?.available === true;
   const webSearchUserProvided = useWebSearchUserProvided();
   const builtinAuthMap = useBuiltinAuthMap();
 
@@ -211,6 +216,7 @@ export function useAgentItems({
           fileSearch: hasFileSearchAccess,
         },
         showMemory,
+        showHindsight,
         webSearchUserProvided,
         builtinAuthMap,
       }),
@@ -226,6 +232,7 @@ export function useAgentItems({
       hasFileSearchAccess,
       skillsPermission,
       showMemory,
+      showHindsight,
       webSearchUserProvided,
       builtinAuthMap,
     ],

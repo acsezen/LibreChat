@@ -13,9 +13,9 @@ export type TogglePatch =
   | { type: 'action-remove'; actionId: string };
 
 function builtinTogglePatch(id: string, selected: boolean): TogglePatch {
-  if (id === 'ask_user_question') {
-    // Native tool presented as a builtin — it has no capability field; the
-    // toggle edits agent.tools exactly like a plugin.
+  if (id === 'ask_user_question' || id === 'hindsight') {
+    // Native tools presented as builtins — no capability field; the toggle
+    // edits agent.tools exactly like a plugin.
     return selected ? { type: 'tool-remove', id } : { type: 'tool-add', id };
   }
   // Every other BuiltinId string equals its AgentCapabilities enum value, so

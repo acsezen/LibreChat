@@ -38,6 +38,7 @@ import {
   stripStreamedIndexStamps,
 } from '~/utils';
 import useFocusRegeneratedResponse from '~/hooks/Chat/useFocusRegeneratedResponse';
+import { startupConfigKey, isHindsightAcknowledged } from '~/data-provider';
 import useGetConversation from '~/hooks/Conversations/useGetConversation';
 import { withSubmittedCodeDecision } from '~/hooks/Agents/codeDecision';
 import useCodeApprovalMode from '~/hooks/Agents/useCodeApprovalMode';
@@ -46,7 +47,6 @@ import useCodeWorkspace from '~/hooks/Agents/useCodeWorkspace';
 import useGetSender from '~/hooks/Conversations/useGetSender';
 import { revealedQueuedTurnFamily } from '~/store/steer';
 import store, { useGetEphemeralAgent } from '~/store';
-import { startupConfigKey } from '~/data-provider';
 import useUserKey from '~/hooks/Input/useUserKey';
 import { useAuthContext } from '~/hooks';
 
@@ -412,6 +412,12 @@ export default function useChatFunctions({
     setShowStopButton(false);
 
     const ephemeralAgent = getEphemeralAgent(conversationId ?? Constants.NEW_CONVO);
+    /** Sent only when the rendered Hindsight control shows On and no change is in flight. */
+    const hindsightMemory = isHindsightAcknowledged(
+      jotaiStore,
+      queryClient,
+      conversationId ?? Constants.NEW_CONVO,
+    );
     /**
      * Manual skill selection resolution:
      *  - Explicit `overrideManualSkills` wins (regenerate / save-and-submit
@@ -769,6 +775,7 @@ export default function useChatFunctions({
       initialResponse,
       isTemporary,
       ephemeralAgent,
+      hindsightMemory,
       editedContent,
       editPrefixLength,
       addedConvo,

@@ -1,6 +1,7 @@
 const { randomUUID } = require('crypto');
 const { isDeepStrictEqual } = require('util');
 const { logger } = require('@librechat/data-schemas');
+const hindsightMemory = require('~/server/services/HindsightMemory');
 const {
   Constants,
   ResourceType,
@@ -560,6 +561,21 @@ async function finalizeResumedTurn({
     await recoverResumedResponseReference(
       { userId, conversationId, client, savedResponseMessage },
       'api/server/controllers/agents/resume.js - recovered resumed response reference',
+    );
+    await hindsightMemory.finalize(
+      {
+        request: req,
+        config: req.config?.config?.hindsight,
+        user: req.user,
+        temporary: isTemporary === true,
+      },
+      userMessage,
+      savedResponseMessage,
+      {
+        unfinished: responseMessage.unfinished,
+        compaction: client?.isCompactionTurn?.() === true,
+        userMetadata: true,
+      },
     );
     if (appliedEventActor != null) {
       const recorded = await recordAgentEventActorReconciliation({
@@ -1857,6 +1873,17 @@ const ResumeAgentController = async (req, res, next, initializeClient, addTitle)
       toolTimingReplayEvents: resumeState?.replayEvents,
     });
     client = result.client;
+    await hindsightMemory.restore(
+      {
+        request: req,
+        config: req.config?.config?.hindsight,
+        user: req.user,
+        conversationId: streamId,
+        generation: job.createdAt,
+        temporary: job.metadata.isTemporary === true,
+      },
+      client,
+    );
 
     // The user approved the code action against the route/session selected at
     // pause time. Re-resolve it on this replica and fail before provider/tool

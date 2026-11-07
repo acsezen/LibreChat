@@ -258,6 +258,7 @@ jest.mock('@librechat/api', () => ({
   getAgentErrorMetadata: (...args) =>
     jest.requireActual('@librechat/api').getAgentErrorMetadata(...args),
   sendEvent: jest.fn(),
+  registerShutdownTask: jest.fn(),
   logAgentMemorySnapshot: jest.fn(),
   isScheduleFireRequest: (...args) => mockIsScheduleFireRequest(...args),
   exemptFromConcurrencyLimiter: (...args) => mockExemptFromConcurrencyLimiter(...args),
@@ -6465,12 +6466,320 @@ describe('ResumableAgentController resume metadata', () => {
       expect(JSON.stringify(published)).toContain(Constants.TOOL_CALL_LIMIT_FINISH_REASON);
     });
 
+    it.each([
+      ['completed', {}, false],
+      ['step-limited', stepLimitClient, true],
+    ])(
+      'finalizes Hindsight after the %s terminal response is persisted',
+      async (_label, clientOverrides, unfinished) => {
+        const hindsightMemory = require('~/server/services/HindsightMemory');
+        const finalize = jest.spyOn(hindsightMemory, 'finalize').mockResolvedValue(undefined);
+        try {
+          mockSaveMessage.mockImplementation(async (_req, message) => ({ ...message }));
+          await runFirstTurn({ clientOverrides });
+          expect(finalize).toHaveBeenCalledTimes(1);
+          expect(finalize.mock.calls[0][2]).toEqual(expect.objectContaining(savedResponseRow()));
+          expect(finalize.mock.calls[0][3]).toEqual({ unfinished, compaction: false });
+          expect(Math.max(...mockSaveMessage.mock.invocationCallOrder)).toBeLessThan(
+            finalize.mock.invocationCallOrder[0],
+          );
+        } finally {
+          finalize.mockRestore();
+        }
+      },
+    );
+
     it('leaves an ordinary completed turn finished and unstamped', async () => {
       await runFirstTurn();
 
       const saved = savedResponseRow();
       expect(saved.unfinished).toBe(false);
       expect(saved.finish_reason).toBeUndefined();
+    });
+  });
+
+  /**
+   * Per-conversation consent through the REAL request.js controller, the REAL
+   * Hindsight adapter singleton (consent store on mongodb-memory-server, real
+   * outbox, loopback Hindsight backend). initialize.js and client.js are
+   * represented by their exact one-line adapter calls (`bindAgent` and
+   * `prepare`); their own wiring is covered by hindsight.dispatch.spec.js and
+   * client.test.js.
+   */
+  describe('per-conversation Hindsight consent', () => {
+    const http = require('node:http');
+    const os = require('node:os');
+    const fsp = require('node:fs/promises');
+    const path = require('node:path');
+    const mongoose = require('mongoose');
+    const { MongoMemoryServer } = require('mongodb-memory-server');
+    const { Constants } = require('librechat-data-provider');
+    const hindsightMemory = require('~/server/services/HindsightMemory');
+
+    const OWNER = 'user-123';
+    const KEY_ENV = 'HINDSIGHT_CONSENT_SPEC_API_KEY';
+    let mongoServer;
+    let backend;
+    let baseUrl;
+    let outboxDir;
+    let backendRequests;
+
+    beforeAll(async () => {
+      process.env[KEY_ENV] = 'synthetic-consent-spec-token';
+      mongoServer = await MongoMemoryServer.create();
+      await mongoose.connect(mongoServer.getUri());
+      backend = http.createServer(async (request, response) => {
+        const chunks = [];
+        for await (const chunk of request) chunks.push(chunk);
+        const url = request.url ?? '';
+        backendRequests.push({ method: request.method, path: url });
+        response.setHeader('Content-Type', 'application/json');
+        if (url.endsWith('/config')) {
+          response.end(
+            JSON.stringify({
+              bank_id: 'private',
+              overrides: {},
+              config: {
+                memory_defense: {
+                  enabled: true,
+                  rules: [{ on: 'sensitive_data', action: 'redact' }],
+                },
+              },
+            }),
+          );
+        } else if (url.endsWith('/memories/recall')) {
+          response.end(JSON.stringify({ results: [{ id: 'fact', text: 'ConsentMarker' }] }));
+        } else if (url.endsWith('/memories')) {
+          const body = JSON.parse(Buffer.concat(chunks).toString() || '{}');
+          response.end(
+            JSON.stringify({
+              success: true,
+              bank_id: 'private',
+              items_count: 1,
+              async: true,
+              operation_id: body.operation_id,
+            }),
+          );
+        } else if (url.includes('/operations/')) {
+          response.end(
+            JSON.stringify({ operation_id: url.split('/').at(-1), status: 'completed' }),
+          );
+        } else {
+          response.writeHead(404);
+          response.end('{}');
+        }
+      });
+      await new Promise((resolve) => backend.listen(0, '127.0.0.1', resolve));
+      baseUrl = `http://127.0.0.1:${backend.address().port}`;
+    }, 60000);
+
+    afterAll(async () => {
+      await hindsightMemory.close();
+      backend.closeAllConnections();
+      await new Promise((resolve) => backend.close(resolve));
+      await mongoose.disconnect();
+      await mongoServer.stop();
+      delete process.env[KEY_ENV];
+    });
+
+    beforeEach(async () => {
+      await hindsightMemory.close();
+      await mongoose.connection.dropDatabase();
+      outboxDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'hindsight-consent-'));
+      backendRequests = [];
+      mockSaveMessage.mockImplementation(async (_req, message) => ({ ...message }));
+    });
+
+    afterEach(async () => {
+      await hindsightMemory.close();
+      await fsp.rm(outboxDir, { recursive: true, force: true });
+    });
+
+    const config = () => ({
+      enabled: true,
+      baseUrl,
+      bankId: 'private',
+      ownerUserId: OWNER,
+      outboxDir,
+      apiKeyEnv: KEY_ENV,
+      pollIntervalMs: 60000,
+      requestTimeoutMs: 2000,
+    });
+    const consents = () => mongoose.connection.db.collection('hindsightconsents');
+    const turns = () => mongoose.connection.db.collection('hindsightturns');
+    const storeConsent = (conversationId, enabled = true) =>
+      consents().insertOne({ user: OWNER, conversationId, enabled, version: 1, fence: 0 });
+    const paths = () => backendRequests.map((record) => record.path);
+    async function pendingJobs() {
+      try {
+        return (await fsp.readdir(path.join(outboxDir, 'pending'))).length;
+      } catch {
+        return 0;
+      }
+    }
+    /** One turn through request.js; `agentTools` is the server-loaded agent's tool list. */
+    async function runTurn(options = {}) {
+      const {
+        conversationId = 'convo-consent',
+        agentTools = [],
+        ephemeral = true,
+        userId = OWNER,
+        requestOverrides = {},
+        bodyOverrides = {},
+      } = options;
+      /** An explicit `acknowledged: undefined` means the page sent no flag at all. */
+      const acknowledged = 'acknowledged' in options ? options.acknowledged : true;
+      let signalFinished;
+      const finished = new Promise((resolve) => {
+        signalFinished = resolve;
+      });
+      mockGenerationJobManager.finishTerminalJob.mockImplementation(async () => signalFinished());
+      let context;
+      const req = {
+        user: { id: userId },
+        body: {
+          text: 'What did I decide?',
+          messageId: 'user-msg',
+          parentMessageId: Constants.NO_PARENT,
+          conversationId,
+          endpointOption: { endpoint: 'agents', modelOptions: { model: 'gpt-4.1' } },
+          ...(acknowledged !== undefined && { hindsightMemory: acknowledged }),
+          ...bodyOverrides,
+        },
+        config: { config: { hindsight: config() } },
+        ...requestOverrides,
+      };
+      const initializeClient = jest.fn(async ({ req: initReq }) => {
+        const primaryConfig = { id: ephemeral ? 'ephemeral-primary' : 'agent_saved' };
+        // initialize.js: bind the primary from its server-loaded definition.
+        hindsightMemory.bindAgent(initReq, primaryConfig, { tools: agentTools }, ephemeral);
+        const client = {
+          options: { agent: primaryConfig },
+          savedMessageIds: new Set(),
+          skipSaveUserMessage: false,
+          sendMessage: jest.fn(async (text, options) => {
+            const userMessage = {
+              messageId: 'user-msg',
+              parentMessageId: Constants.NO_PARENT,
+              conversationId: options.conversationId,
+              isCreatedByUser: true,
+              text,
+            };
+            options.onStart(userMessage, 'response-msg');
+            // client.js: automatic retrieval while building messages.
+            context = await hindsightMemory.prepare({
+              request: initReq,
+              config: initReq.config?.config?.hindsight,
+              user: initReq.user,
+              query: text,
+              messages: [],
+              temporary: hindsightMemory.temporary(initReq),
+              compaction: false,
+            });
+            return {
+              messageId: 'response-msg',
+              parentMessageId: 'user-msg',
+              conversationId: options.conversationId,
+              isCreatedByUser: false,
+              text: 'You chose the read replica.',
+              content: [{ type: 'text', text: 'You chose the read replica.' }],
+              databasePromise: Promise.resolve({
+                conversation: { conversationId: options.conversationId, title: null },
+              }),
+            };
+          }),
+        };
+        return { client };
+      });
+      await AgentController(
+        req,
+        createResumableResponse(),
+        jest.fn(),
+        initializeClient,
+        jest.fn(async () => {}),
+      );
+      await finished;
+      await nextTick();
+      await nextTick();
+      return { req, context: () => context };
+    }
+
+    it('keeps an existing chat Off without stored consent: no Hindsight request, no capture', async () => {
+      const turn = await runTurn();
+      expect(turn.context()).toBeUndefined();
+      expect(backendRequests).toEqual([]);
+      expect(await pendingJobs()).toBe(0);
+      expect(await turns().findOne({}, { projection: { _id: 0, createdAt: 0 } })).toEqual({
+        user: OWNER,
+        conversationId: 'convo-consent',
+        generation: '1000',
+        enabled: false,
+        consentVersion: 1,
+        capableAgentIds: [],
+      });
+      /** Admission fences the chat with an Off row; only a toggle or a new chat's choice stores On. */
+      expect(await consents().findOne({}, { projection: { _id: 0, enabled: 1 } })).toEqual({
+        enabled: false,
+      });
+    });
+
+    it('retrieves before generation and captures after the response is saved when the chat is On', async () => {
+      await storeConsent('convo-consent');
+      const turn = await runTurn();
+      expect(turn.context()).toEqual(expect.objectContaining({ status: 'available' }));
+      expect(turn.context().text).toContain('ConsentMarker');
+      expect(paths().filter((url) => url.endsWith('/memories/recall'))).toHaveLength(1);
+      /** Capture is durable once queued; delivery runs on the outbox's own schedule. */
+      const [job] = await fsp.readdir(path.join(outboxDir, 'pending'));
+      const queued = await fsp.readFile(path.join(outboxDir, 'pending', job), 'utf8');
+      expect(queued).toContain('What did I decide?');
+      expect(queued).toContain('You chose the read replica.');
+      expect(queued).not.toContain('ConsentMarker');
+      expect(await turns().findOne({})).toEqual(
+        expect.objectContaining({ enabled: true, capableAgentIds: ['ephemeral-primary'] }),
+      );
+    });
+
+    it.each([
+      ['no page confirmation', { acknowledged: undefined }],
+      ['a false page flag', { acknowledged: false }],
+      [
+        'a saved agent without the Hindsight tool',
+        { ephemeral: false, agentTools: ['web_search'] },
+      ],
+      ['a scheduled run', { requestOverrides: { _isScheduledFire: true } }],
+      ['another user', { userId: 'someone-else' }],
+      ['a temporary chat', { bodyOverrides: { isTemporary: true } }],
+    ])('stays Off with stored consent for %s', async (_label, options) => {
+      await storeConsent('convo-consent');
+      const turn = await runTurn(options);
+      expect(turn.context()).toBeUndefined();
+      expect(backendRequests).toEqual([]);
+      expect(await pendingJobs()).toBe(0);
+    });
+
+    it('uses Hindsight on a saved agent whose server-loaded tools carry the entry', async () => {
+      await storeConsent('convo-consent');
+      const turn = await runTurn({ ephemeral: false, agentTools: ['web_search', 'hindsight'] });
+      expect(turn.context()).toEqual(expect.objectContaining({ status: 'available' }));
+    });
+
+    it("persists a new chat's first-turn On choice before any Hindsight request", async () => {
+      mockGetConvo.mockResolvedValue(null);
+      const turn = await runTurn({ conversationId: 'new' });
+      const [consent] = await consents().find({}).toArray();
+      expect(consent).toEqual(expect.objectContaining({ user: OWNER, enabled: true, version: 1 }));
+      expect(consent.conversationId).not.toBe('new');
+      expect(turn.context()).toEqual(expect.objectContaining({ status: 'available' }));
+    });
+
+    /** A reused client request id makes the server derive an existing chat's id for a "new" chat. */
+    it('does not switch an existing chat On when a new-chat request resolves to it', async () => {
+      mockGetConvo.mockResolvedValue({ conversationId: 'existing', createdAt: '2026-01-01' });
+      const turn = await runTurn({ conversationId: 'new' });
+      expect(turn.context()).toBeUndefined();
+      expect(await consents().countDocuments({ enabled: true })).toBe(0);
+      expect(backendRequests).toEqual([]);
     });
   });
 });

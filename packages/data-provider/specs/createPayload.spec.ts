@@ -93,3 +93,22 @@ describe('createPayload compaction', () => {
     expect('compact' in payload).toBe(false);
   });
 });
+
+describe('createPayload Hindsight confirmation', () => {
+  const withHindsight = (endpoint: string, hindsightMemory?: boolean) =>
+    ({ ...makeSubmission(endpoint), hindsightMemory }) as TSubmission;
+
+  it('forwards the page confirmation to agents', () => {
+    expect(createPayload(withHindsight(EModelEndpoint.agents, true)).payload.hindsightMemory).toBe(
+      true,
+    );
+    expect(createPayload(withHindsight('OpenRouter', false)).payload.hindsightMemory).toBe(false);
+    expect(createPayload(withHindsight('OpenRouter')).payload.hindsightMemory).toBeUndefined();
+  });
+
+  it('never sends it to assistants', () => {
+    expect(
+      createPayload(withHindsight(EModelEndpoint.assistants, true)).payload.hindsightMemory,
+    ).toBeUndefined();
+  });
+});

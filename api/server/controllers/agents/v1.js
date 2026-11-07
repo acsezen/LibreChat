@@ -84,6 +84,7 @@ const { resizeAvatar } = require('~/server/services/Files/images/avatar');
 const { getFileStrategy } = require('~/server/utils/getFileStrategy');
 const { filterFile } = require('~/server/services/Files/process');
 const { getCachedTools } = require('~/server/services/Config');
+const { HINDSIGHT_TOOL } = require('@vectorize-io/hindsight-librechat');
 const {
   createMCPPermissionContext,
   resolveConfigServers,
@@ -100,6 +101,7 @@ const systemTools = {
   [Tools.file_search]: true,
   [Tools.web_search]: true,
   [Tools.memory]: true,
+  [HINDSIGHT_TOOL]: true,
 };
 
 const MAX_SEARCH_LEN = 100;

@@ -57,6 +57,11 @@ export interface BuildCatalogInputs {
    */
   showMemory?: boolean;
   /**
+   * Whether this user may add Hindsight memory to agents: the deployment's
+   * Hindsight owner with Hindsight enabled (`GET /api/hindsight/availability`).
+   */
+  showHindsight?: boolean;
+  /**
    * Whether `web_search` uses USER_PROVIDED auth (a user-managed key). Drives the
    * cog-vs-info affordance on the web_search card/row: configurable only when a
    * user key exists; SYSTEM_DEFINED deployments have nothing to configure.
@@ -170,6 +175,16 @@ export function buildCatalog(inputs: BuildCatalogInputs): AgentItem[] {
       iconKey: 'memory',
       name: 'com_ui_memory',
       description: 'com_agents_memory_info',
+    });
+  }
+
+  if (inputs.showHindsight) {
+    items.push({
+      kind: 'builtin',
+      id: 'hindsight',
+      iconKey: 'hindsight',
+      name: 'com_ui_hindsight',
+      description: 'com_agents_hindsight_info',
     });
   }
 

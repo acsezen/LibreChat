@@ -3,6 +3,7 @@ import {
   MessageCircleQuestion,
   Globe,
   Brain,
+  History,
   Sparkles,
   FileText,
   FileSearch,
@@ -49,6 +50,10 @@ const BUILTIN_ICONS: Record<string, ItemIcon> = {
   ask_user_question: {
     Icon: MessageCircleQuestion,
     colorClass: 'bg-teal-500/15 text-teal-600 dark:text-teal-300',
+  },
+  hindsight: {
+    Icon: History,
+    colorClass: 'bg-violet-500/15 text-violet-600 dark:text-violet-300',
   },
 };
 

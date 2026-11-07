@@ -2840,6 +2840,30 @@ export const transactionsSchema = z.object({
 
 export const DEFAULT_MEMORY_MAX_INPUT_TOKENS = 12000;
 
+export const hindsightSchema = z.union([
+  z
+    .object({
+      enabled: z.literal(true),
+      baseUrl: z.string().url(),
+      bankId: z.string().trim().min(1),
+      ownerUserId: z.string().trim().min(1),
+      apiKeyEnv: z.string().min(1).default('HINDSIGHT_API_KEY'),
+      outboxDir: z.string().min(1).default('/app/data/hindsight'),
+      retrieval: z.enum(['recall', 'reflect', 'pages']).optional(),
+      budget: z.enum(['low', 'mid', 'high']).optional(),
+      maxContextTokens: z.number().int().positive().optional(),
+      maxContextChars: z.number().int().positive().optional(),
+      retrievalTimeoutMs: z.number().int().positive().optional(),
+      requestTimeoutMs: z.number().int().positive().optional(),
+      pollIntervalMs: z.number().int().positive().optional(),
+      nativeTools: z.boolean().optional(),
+      toolTimeoutMs: z.number().int().positive().optional(),
+      requireSensitiveDataProtection: z.boolean().optional(),
+    })
+    .strict(),
+  z.object({ enabled: z.literal(false).default(false) }),
+]);
+
 export const memorySchema = z.object({
   disabled: z.boolean().optional(),
   validKeys: z.array(z.string()).optional(),
@@ -3130,6 +3154,7 @@ export const configSchema = z.object({
   webSearch: webSearchSchema.optional(),
   langfuse: langfuseConfigSchema.optional(),
   memory: memorySchema.optional(),
+  hindsight: hindsightSchema.optional(),
   summarization: summarizationConfigSchema.optional(),
   skillSync: skillSyncConfigSchema,
   secureImageLinks: z.boolean().optional(),

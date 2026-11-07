@@ -39,6 +39,7 @@ import {
   PendingToolApprovalButton,
   PendingToolApprovalPanel,
 } from '~/components/Chat/approval/Review';
+import { hindsightKind } from '~/hooks/Hindsight/useHindsightConsent';
 import PendingManualSkillsChips from './PendingManualSkillsChips';
 import usePastedTextEdit from '~/hooks/Files/usePastedTextEdit';
 import useAskAnswerMode from '~/hooks/Input/useAskAnswerMode';
@@ -69,6 +70,7 @@ import TokenUsage from './TokenUsage';
 import StopButton from './StopButton';
 import SendButton from './SendButton';
 import EditBadges from './EditBadges';
+import Hindsight from './Hindsight';
 import BadgeRow from './BadgeRow';
 import Mention from './Mention';
 import store from '~/store';
@@ -876,6 +878,15 @@ const ChatForm = memo(function ChatForm({
                     Array.isArray(conversation?.messages) && conversation.messages.length >= 1
                   }
                 />
+                {index === 0 && (
+                  <Hindsight
+                    conversationId={conversationId}
+                    kind={hindsightKind(endpoint)}
+                    agentId={conversation?.agent_id}
+                    hidden={hideBadgeRow}
+                    isSubmitting={isSubmitting}
+                  />
+                )}
                 <CodeApprovalMenu
                   conversation={conversation}
                   addedConversation={addedConvo}

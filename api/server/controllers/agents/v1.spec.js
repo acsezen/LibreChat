@@ -2436,6 +2436,55 @@ describe('Agent Controllers - Mass Assignment Protection', () => {
         expect(agentInDb.tool_resources.file_search.file_ids).toEqual([authorFile, editorFile]);
       });
     });
+
+    /**
+     * KNOWN ISSUE, fix deferred (see the Hindsight LibreChat adapter README,
+     * "Known issues"): the first save of an agent that still stores legacy
+     * `tool_resources.ocr` rebuilds its tool list from the stored agent
+     * (`mergeAgentOcrConversion`), discarding the request's tool add/remove.
+     * These assert the correct behavior, so they pass while the bug exists and
+     * fail once it is fixed; then turn them into ordinary tests.
+     */
+    describe('legacy OCR agents (known issue)', () => {
+      beforeEach(async () => {
+        await Agent.updateOne(
+          { id: existingAgentId },
+          {
+            $set: {
+              tools: ['ocr', 'web_search', 'hindsight'],
+              tool_resources: { ocr: { file_ids: ['ocr-legacy'] } },
+            },
+          },
+        );
+        mockReq.user.id = existingAgentAuthorId.toString();
+        mockReq.params.id = existingAgentId;
+      });
+
+      test.failing('keeps a tool removed in the first save', async () => {
+        mockReq.body = { tools: ['ocr', 'web_search'] };
+        await updateAgentHandler(mockReq, mockRes);
+        const agent = await Agent.findOne({ id: existingAgentId }).lean();
+        expect(agent.tools).toEqual(['context', 'web_search']);
+      });
+
+      test.failing('keeps a tool added in the first save', async () => {
+        await Agent.updateOne({ id: existingAgentId }, { $set: { tools: ['ocr', 'web_search'] } });
+        mockReq.body = { tools: ['ocr', 'web_search', 'hindsight'] };
+        await updateAgentHandler(mockReq, mockRes);
+        const agent = await Agent.findOne({ id: existingAgentId }).lean();
+        expect(agent.tools).toEqual(['context', 'web_search', 'hindsight']);
+      });
+
+      test('applies tool edits normally once the first save migrated the OCR resource', async () => {
+        mockReq.body = { tools: ['ocr', 'web_search', 'hindsight'] };
+        await updateAgentHandler(mockReq, mockRes);
+        mockReq.body = { tools: ['context', 'web_search'] };
+        await updateAgentHandler(mockReq, mockRes);
+        const agent = await Agent.findOne({ id: existingAgentId }).lean();
+        expect(agent.tool_resources.ocr).toBeUndefined();
+        expect(agent.tools).toEqual(['context', 'web_search']);
+      });
+    });
   });
 
   describe('tool_resources ownership pruning in alternate write paths', () => {

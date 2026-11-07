@@ -7976,6 +7976,90 @@ describe('AgentClient - titleConvo', () => {
       client.maxContextTokens = 4096;
     });
 
+    it.each([true, false])(
+      'injects independent Hindsight context with native UI memory enabled=%s',
+      async (enabled) => {
+        const hindsightMemory = require('~/server/services/HindsightMemory');
+        /** Admission is the adapter's decision (covered by its suite); here it admits the primary. */
+        const allowed = jest
+          .spyOn(hindsightMemory, 'agentAllowed')
+          .mockImplementation(
+            (request, agent) => request === mockReq && agent === client.options.agent,
+          );
+        mockReq.user.personalization.memories = enabled;
+        mockReq.config.config = {
+          hindsight: {
+            enabled: true,
+            baseUrl: 'https://memory.example.test',
+            bankId: 'private',
+            ownerUserId: mockReq.user.id,
+            outboxDir: '/unused-fixture',
+          },
+        };
+        client.useMemory = jest
+          .fn()
+          .mockResolvedValue(
+            enabled ? { withKeys: 'NativeMarker', withoutKeys: 'NativeMarker' } : undefined,
+          );
+        const prepare = jest.spyOn(hindsightMemory, 'prepare').mockResolvedValue({
+          provider: 'hindsight',
+          status: 'available',
+          text: 'HindsightMarker',
+        });
+        try {
+          await client.buildMessages(
+            [{ messageId: 'user-one', text: 'Hello', isCreatedByUser: true }],
+            null,
+            { instructions: 'Base instructions', additional_instructions: null },
+          );
+          expect(prepare).toHaveBeenCalledWith(
+            expect.objectContaining({
+              config: mockReq.config.config.hindsight,
+              user: mockReq.user,
+              temporary: false,
+            }),
+          );
+          const context = client.options.agent.additional_instructions;
+          expect(context).toContain('HindsightMarker');
+          expect(context.match(/HindsightMarker/g)).toHaveLength(1);
+          if (enabled) expect(context).toContain('NativeMarker');
+          else expect(context).not.toContain('NativeMarker');
+        } finally {
+          prepare.mockRestore();
+          allowed.mockRestore();
+        }
+      },
+    );
+
+    it('does not inject Hindsight context into an agent the turn did not admit', async () => {
+      const hindsightMemory = require('~/server/services/HindsightMemory');
+      mockReq.config.config = {
+        hindsight: {
+          enabled: true,
+          baseUrl: 'https://memory.example.test',
+          bankId: 'private',
+          ownerUserId: mockReq.user.id,
+          outboxDir: '/unused-fixture',
+        },
+      };
+      client.useMemory = jest.fn().mockResolvedValue(undefined);
+      const prepare = jest.spyOn(hindsightMemory, 'prepare').mockResolvedValue({
+        provider: 'hindsight',
+        status: 'available',
+        text: 'HindsightMarker',
+      });
+      try {
+        await client.buildMessages(
+          [{ messageId: 'user-one', text: 'Hello', isCreatedByUser: true }],
+          null,
+          { instructions: 'Base instructions', additional_instructions: null },
+        );
+        expect(client.options.agent.additional_instructions ?? '').not.toContain('HindsightMarker');
+      } finally {
+        prepare.mockRestore();
+      }
+    });
+
     it('should only pass memory context to the primary agent by default', async () => {
       const memoryContent = 'User prefers dark mode. User is a software developer.';
       client.useMemory = jest

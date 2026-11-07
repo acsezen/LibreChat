@@ -192,6 +192,16 @@ describe('MCP Tool Authorization', () => {
       expect(mockGetAllServerConfigs).not.toHaveBeenCalled();
     });
 
+    test('keeps the Hindsight Tool Library entry and drops look-alike names', async () => {
+      const result = await filterAuthorizedTools({
+        tools: ['hindsight', 'hindsight_recall', 'Hindsight', 'hindsight '],
+        userId,
+        availableTools: {},
+      });
+
+      expect(result).toEqual(['hindsight']);
+    });
+
     test('should not query MCP registry when no MCP tools are present', async () => {
       const result = await filterAuthorizedTools({
         tools: ['web_search', 'custom_tool'],

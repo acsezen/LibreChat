@@ -1,4 +1,5 @@
 const { logger } = require('@librechat/data-schemas');
+const hindsightMemory = require('~/server/services/HindsightMemory');
 const { createContentAggregator, GraphNodeKeys } = require('@librechat/agents');
 const {
   resolveSender,
@@ -772,6 +773,7 @@ const initializeClientWithProvider = async ({
       getRoleByName: db.getRoleByName,
     },
   );
+  hindsightMemory.bindAgent(req, primaryConfig, primaryAgent, isEphemeralAgentId(primaryAgent.id));
 
   /** Price emitted usage with the primary agent's resolved endpoint config so
    *  custom-endpoint agents reflect configured rates (mirrors the AgentClient
@@ -871,6 +873,7 @@ const initializeClientWithProvider = async ({
       // stale entries are unreachable at runtime.
       onAgentInitialized: (agentId, agent, config) => {
         agentToolContexts.set(agentId, buildAgentToolContext({ agent, config }));
+        hindsightMemory.bindAgent(req, config, agent);
       },
       // Pass through the `@librechat/api` exports so that tests which
       // `jest.mock('@librechat/api')` can override the initializer/validator.
@@ -1806,6 +1809,7 @@ const initializeClientWithProvider = async ({
     toolExecuteOptions.provisionFiles,
   );
 
+  hindsightMemory.wrapToolExecution(req, toolExecuteOptions);
   const eventHandlers = getDefaultHandlers({
     res,
     contentParts,

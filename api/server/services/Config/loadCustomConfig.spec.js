@@ -100,6 +100,28 @@ describe('loadCustomConfig', () => {
     expect(result).toBeNull();
   });
 
+  it('loads the independent Hindsight section without changing native memory settings', async () => {
+    const memory = { disabled: true, validKeys: ['unchanged-key'] };
+    loadYaml.mockReturnValueOnce({
+      version: '1.0',
+      memory,
+      hindsight: {
+        enabled: true,
+        baseUrl: 'https://memory.example.test',
+        bankId: 'private',
+        ownerUserId: 'owner',
+      },
+    });
+    const result = await loadCustomConfig(false);
+    expect(result.memory).toEqual(memory);
+    expect(result.hindsight).toMatchObject({
+      enabled: true,
+      bankId: 'private',
+      ownerUserId: 'owner',
+    });
+    expect(result.hindsight.apiKeyEnv).toBe('HINDSIGHT_API_KEY');
+  });
+
   it('should parse, validate, and cache a valid local configuration', async () => {
     const mockConfig = {
       version: '1.0',

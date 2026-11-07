@@ -1,7 +1,15 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import * as Ariakit from '@ariakit/react';
 import { TooltipAnchor, DropdownPopup, PinIcon, VectorIcon } from '@librechat/client';
-import { Brain, Globe, ScrollText, Settings, Settings2, TerminalSquareIcon } from 'lucide-react';
+import {
+  Brain,
+  Globe,
+  History,
+  Settings,
+  Settings2,
+  ScrollText,
+  TerminalSquareIcon,
+} from 'lucide-react';
 import {
   AuthType,
   Permissions,
@@ -17,6 +25,7 @@ import {
   useHasMemoryAccess,
   useAgentCapabilities,
 } from '~/hooks';
+import useHindsightConsent from '~/hooks/Hindsight/useHindsightConsent';
 import ArtifactsSubMenu from '~/components/Chat/Input/ArtifactsSubMenu';
 import MCPSubMenu from '~/components/Chat/Input/MCPSubMenu';
 import { useGetStartupConfig } from '~/data-provider';
@@ -73,6 +82,12 @@ const ToolsDropdown = ({ disabled }: ToolsDropdownProps) => {
 
   const canUseMemory = useHasMemoryAccess();
   const showMemory = canUseMemory && memoryEnabled && user?.personalization?.memories !== false;
+  /** The Tools menu only renders for model chats; the composer badge shows the confirmed state. */
+  const hindsight = useHindsightConsent({
+    conversationId: context?.conversationId,
+    kind: 'model',
+    hidden: false,
+  });
 
   const [isPopoverActive, setIsPopoverActive] = useState(false);
   const isDisabled = disabled ?? false;
@@ -307,6 +322,25 @@ const ToolsDropdown = ({ disabled }: ToolsDropdownProps) => {
               <PinIcon unpin={isMemoryPinned} />
             </div>
           </button>
+        </div>
+      ),
+    });
+  }
+
+  if (hindsight.shown) {
+    dropdownItems.push({
+      /** The shared hook ignores this while a change is pending or a response is generating. */
+      onClick: () => hindsight.setEnabled(!hindsight.enabled),
+      hideOnClick: false,
+      render: (props) => (
+        <div {...props} data-testid="tools-menu-hindsight">
+          <div className="flex items-center gap-2">
+            <History className="icon-md" aria-hidden="true" />
+            <span>{localize('com_ui_hindsight')}</span>
+          </div>
+          <span className="text-xs text-text-secondary" aria-live="polite">
+            {localize(hindsight.enabled ? 'com_ui_on' : 'com_ui_off')}
+          </span>
         </div>
       ),
     });

@@ -1,4 +1,5 @@
 const { logger, tenantStorage, createChatExpirationDate } = require('@librechat/data-schemas');
+const hindsightMemory = require('~/server/services/HindsightMemory');
 const { v5: uuidv5 } = require('uuid');
 const {
   Constants,
@@ -1934,6 +1935,17 @@ const ResumableAgentController = async (req, res, next, initializeClient, addTit
       }
     });
 
+    const hindsightAdmission = hindsightMemory.beginAdmission({
+      request: req,
+      config: req.config?.config?.hindsight,
+      user: req.user,
+      conversationId,
+      newConversation: isNewConvo,
+      generation: jobCreatedAt,
+      interactive: !isScheduledFire && req._isAgentTrigger !== true,
+      temporary: hindsightMemory.temporary(req),
+      acknowledged: req.body?.hindsightMemory,
+    });
     /** @type {{ client: TAgentClient; userMCPAuthMap?: Record<string, Record<string, string>> }} */
     const result = await initializeClient({
       req,
@@ -1948,6 +1960,7 @@ const ResumableAgentController = async (req, res, next, initializeClient, addTit
     });
     startupTelemetry?.mark('client_initialized');
     client = result.client;
+    await hindsightMemory.admit(hindsightAdmission, client);
     const normalizedMCPRequestBody = createMCPRuntimeRequestBody({
       messageId: mcpRequestBody.messageId,
       conversationId: mcpRequestBody.conversationId,
@@ -3043,6 +3056,17 @@ const ResumableAgentController = async (req, res, next, initializeClient, addTit
           'api/server/controllers/agents/request.js - recovered response message reference',
         );
         logAgentMemorySnapshot('after_terminal_save', terminalMemoryContext);
+        await hindsightMemory.finalize(
+          {
+            request: req,
+            config: req.config?.config?.hindsight,
+            user: req.user,
+            temporary: hindsightMemory.temporary(req),
+          },
+          userMessage,
+          savedResponseMessage,
+          { unfinished: responseIsUnfinished, compaction: client.isCompactionTurn?.() === true },
+        );
         if (appliedEventActor != null) {
           const recorded = await recordAgentEventActorReconciliation({
             user: userId,

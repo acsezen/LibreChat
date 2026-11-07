@@ -19,6 +19,7 @@ export * from './Traces';
 export * from './connection';
 export * from './Favorites';
 export * from './CodeEnvironments';
+export * from './Hindsight';
 export * from './mutations';
 export * from './prompts';
 export * from './queries';

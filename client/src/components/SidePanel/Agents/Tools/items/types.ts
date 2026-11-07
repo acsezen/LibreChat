@@ -21,7 +21,12 @@ export type BuiltinId =
    * toggling ride `agent.tools` exactly like a plugin — see the special cases
    * in `selectors.ts` / `mutations.ts`.
    */
-  | 'ask_user_question';
+  | 'ask_user_question'
+  /**
+   * Hindsight memory, the same native-tool shape: an `agent.tools` entry that
+   * makes the agent eligible; each chat still starts Off until switched On.
+   */
+  | 'hindsight';
 
 export type AgentItemStatus = 'needs_setup';
 

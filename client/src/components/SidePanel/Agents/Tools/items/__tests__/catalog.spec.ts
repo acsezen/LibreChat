@@ -299,4 +299,18 @@ describe('buildCatalog', () => {
     });
     expect(items.map((i) => i.kind)).toEqual(['builtin', 'mcp', 'tool', 'skill', 'action']);
   });
+
+  test('offers Hindsight as a builtin only to its owner', () => {
+    const hindsight = (items: ReturnType<typeof buildCatalog>) =>
+      items.find((i) => i.kind === 'builtin' && i.id === 'hindsight');
+    expect(hindsight(buildCatalog(emptyInputs))).toBeUndefined();
+    expect(hindsight(buildCatalog({ ...emptyInputs, showHindsight: false }))).toBeUndefined();
+    expect(hindsight(buildCatalog({ ...emptyInputs, showHindsight: true }))).toEqual({
+      kind: 'builtin',
+      id: 'hindsight',
+      iconKey: 'hindsight',
+      name: 'com_ui_hindsight',
+      description: 'com_agents_hindsight_info',
+    });
+  });
 });

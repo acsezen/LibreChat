@@ -115,6 +115,8 @@ jest.mock('~/store', () => ({
   },
 }));
 
+import { getDefaultStore } from 'jotai';
+import { hindsightDraftAtom } from '~/store/hindsight';
 import useNewConvo, { clearInheritedAgentWorkspace } from '../useNewConvo';
 
 describe('clearInheritedAgentWorkspace', () => {
@@ -227,5 +229,32 @@ describe('useNewConvo reset cleanup', () => {
 
     expect(mockStorePendingDiscardIds).toHaveBeenCalledWith(0, ['inflight-paste']);
     expect(mockPendingDiscardIds).toEqual(new Set(['inflight-paste']));
+  });
+});
+
+describe('useNewConvo Hindsight draft', () => {
+  it('starts every new chat with Hindsight Off', () => {
+    const jotai = getDefaultStore();
+    jotai.set(hindsightDraftAtom, true);
+    const { result } = renderHook(() => useNewConvo());
+
+    act(() => {
+      result.current.newConversation();
+    });
+
+    expect(jotai.get(hindsightDraftAtom)).toBe(false);
+  });
+
+  it('keeps the draft when the same composer is only refreshed', () => {
+    const jotai = getDefaultStore();
+    jotai.set(hindsightDraftAtom, true);
+    const { result } = renderHook(() => useNewConvo());
+
+    act(() => {
+      result.current.newConversation({ keepComposerState: true });
+    });
+
+    expect(jotai.get(hindsightDraftAtom)).toBe(true);
+    jotai.set(hindsightDraftAtom, false);
   });
 });

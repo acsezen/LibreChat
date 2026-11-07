@@ -1,0 +1,206 @@
+import { createElement } from 'react';
+import { RecoilRoot } from 'recoil';
+import { Provider, createStore } from 'jotai';
+import userEvent from '@testing-library/user-event';
+import { Constants, dataService } from 'librechat-data-provider';
+import { act, render, screen, waitFor } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import type { ReactNode } from 'react';
+import type { HindsightSurface } from '~/hooks/Hindsight/useHindsightConsent';
+import { hindsightAcknowledgedAtom, hindsightDraftAtom } from '~/store/hindsight';
+import Hindsight from '../Hindsight';
+import store from '~/store';
+
+const mockShowToast = jest.fn();
+
+jest.mock('librechat-data-provider', () => {
+  const actual = jest.requireActual('librechat-data-provider');
+  return {
+    ...actual,
+    dataService: {
+      ...actual.dataService,
+      getAgentById: jest.fn(),
+      getHindsightConsent: jest.fn(),
+      updateHindsightConsent: jest.fn(),
+      getHindsightAvailability: jest.fn(),
+    },
+  };
+});
+
+jest.mock('@librechat/client', () => ({
+  ...jest.requireActual('@librechat/client'),
+  useToastContext: () => ({ showToast: mockShowToast }),
+}));
+
+jest.mock('~/hooks', () => ({
+  useLocalize: () => (key: string) => key,
+}));
+
+const api = jest.mocked(dataService);
+
+function setup(
+  surface: Partial<HindsightSurface> = {},
+  { isSubmitting = false, temporary = false } = {},
+) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  const jotai = createStore();
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <RecoilRoot initializeState={({ set }) => set(store.isTemporary, temporary)}>
+      <QueryClientProvider client={queryClient}>
+        <Provider store={jotai}>{children}</Provider>
+      </QueryClientProvider>
+    </RecoilRoot>
+  );
+  const props: HindsightSurface & { isSubmitting: boolean } = {
+    conversationId: 'convo-1',
+    kind: 'agent',
+    agentId: 'agent_1',
+    hidden: false,
+    isSubmitting,
+    ...surface,
+  };
+  const view = render(createElement(Hindsight, props), { wrapper });
+  return { ...view, jotai, queryClient };
+}
+
+describe('Hindsight composer switch', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    localStorage.clear();
+    api.getHindsightAvailability.mockResolvedValue({ available: true });
+    api.getHindsightConsent.mockResolvedValue({ available: true, enabled: false });
+    api.getAgentById.mockResolvedValue({ id: 'agent_1', tools: ['hindsight'] } as never);
+  });
+
+  it('starts Off in a new chat and switches only the in-memory draft', async () => {
+    const { jotai } = setup({ conversationId: Constants.NEW_CONVO as string });
+    const toggle = await screen.findByTestId('hindsight-badge');
+    expect(toggle).toHaveAttribute('aria-checked', 'false');
+    expect(jotai.get(hindsightAcknowledgedAtom)).toBeNull();
+
+    await userEvent.click(toggle);
+
+    expect(toggle).toHaveAttribute('aria-checked', 'true');
+    expect(jotai.get(hindsightDraftAtom)).toBe(true);
+    expect(jotai.get(hindsightAcknowledgedAtom)).toBe(Constants.NEW_CONVO);
+    expect(api.updateHindsightConsent).not.toHaveBeenCalled();
+    expect(api.getHindsightConsent).not.toHaveBeenCalled();
+    expect(localStorage.length).toBe(0);
+  });
+
+  it('shows the server-confirmed state of an existing chat and confirms it for sending', async () => {
+    api.getHindsightConsent.mockResolvedValue({ available: true, enabled: true });
+    const { jotai } = setup();
+    const toggle = await screen.findByTestId('hindsight-badge');
+    await waitFor(() => expect(toggle).toHaveAttribute('aria-checked', 'true'));
+    expect(api.getHindsightConsent).toHaveBeenCalledWith('convo-1');
+    expect(jotai.get(hindsightAcknowledgedAtom)).toBe('convo-1');
+  });
+
+  it('changes an existing chat only through the server and shows its answer', async () => {
+    api.updateHindsightConsent.mockResolvedValue({ enabled: true });
+    const { jotai } = setup();
+    const toggle = await screen.findByTestId('hindsight-badge');
+    await waitFor(() => expect(toggle).not.toBeDisabled());
+
+    await userEvent.click(toggle);
+
+    expect(api.updateHindsightConsent).toHaveBeenCalledWith('convo-1', true);
+    await waitFor(() => expect(toggle).toHaveAttribute('aria-checked', 'true'));
+    expect(jotai.get(hindsightAcknowledgedAtom)).toBe('convo-1');
+  });
+
+  it('keeps showing the saved setting and refetches it when a change fails', async () => {
+    api.updateHindsightConsent.mockRejectedValue(new Error('409'));
+    const { jotai } = setup();
+    const toggle = await screen.findByTestId('hindsight-badge');
+    await waitFor(() => expect(toggle).not.toBeDisabled());
+
+    await userEvent.click(toggle);
+
+    await waitFor(() => expect(mockShowToast).toHaveBeenCalled());
+    await waitFor(() => expect(api.getHindsightConsent).toHaveBeenCalledTimes(2));
+    expect(toggle).toHaveAttribute('aria-checked', 'false');
+    expect(jotai.get(hindsightAcknowledgedAtom)).toBeNull();
+  });
+
+  it('does not confirm On while a change is still pending', async () => {
+    api.getHindsightConsent.mockResolvedValue({ available: true, enabled: true });
+    let finish: (value: { enabled: boolean }) => void = () => undefined;
+    api.updateHindsightConsent.mockImplementation(
+      () => new Promise((resolve) => (finish = resolve)),
+    );
+    const { jotai } = setup();
+    const toggle = await screen.findByTestId('hindsight-badge');
+    await waitFor(() => expect(jotai.get(hindsightAcknowledgedAtom)).toBe('convo-1'));
+
+    await userEvent.click(toggle);
+
+    expect(toggle).toBeDisabled();
+    expect(toggle).toHaveAttribute('aria-busy', 'true');
+    expect(jotai.get(hindsightAcknowledgedAtom)).toBeNull();
+    await act(async () => finish({ enabled: false }));
+    await waitFor(() => expect(toggle).toHaveAttribute('aria-checked', 'false'));
+  });
+
+  it('is disabled while a response is generating', async () => {
+    setup({}, { isSubmitting: true });
+    const toggle = await screen.findByTestId('hindsight-badge');
+    await waitFor(() => expect(api.getHindsightConsent).toHaveBeenCalled());
+    expect(toggle).toBeDisabled();
+  });
+
+  it.each([
+    [
+      'the user is not the Hindsight owner',
+      () => api.getHindsightAvailability.mockResolvedValue({ available: false }),
+      {},
+      {},
+    ],
+    [
+      'the agent lacks the Hindsight tool',
+      () => api.getAgentById.mockResolvedValue({ id: 'agent_1', tools: ['web_search'] } as never),
+      {},
+      {},
+    ],
+    ['the model spec hides the badge row', () => undefined, { hidden: true }, {}],
+    ['the chat is temporary', () => undefined, {}, { temporary: true }],
+    ['the endpoint is unsupported', () => undefined, { kind: null }, {}],
+    [
+      'the server reports the chat unsupported',
+      () => api.getHindsightConsent.mockResolvedValue({ available: false, enabled: true }),
+      {},
+      {},
+    ],
+  ] as const)('renders nothing when %s', async (_label, arrange, surface, options) => {
+    arrange();
+    const { jotai } = setup(surface as Partial<HindsightSurface>, options);
+    await waitFor(() => expect(api.getHindsightAvailability).toHaveBeenCalled());
+    await act(async () => undefined);
+    expect(screen.queryByTestId('hindsight-badge')).toBeNull();
+    expect(jotai.get(hindsightAcknowledgedAtom)).toBeNull();
+  });
+
+  it.each([
+    [true, 1],
+    [false, 0],
+  ])('in a model chat, shows the switch only while On (stored %s)', async (enabled, count) => {
+    api.getHindsightConsent.mockResolvedValue({ available: true, enabled });
+    const { jotai } = setup({ kind: 'model', agentId: undefined });
+    await waitFor(() => expect(api.getHindsightConsent).toHaveBeenCalledWith('convo-1'));
+    await act(async () => undefined);
+    expect(screen.queryAllByTestId('hindsight-badge')).toHaveLength(count);
+    expect(jotai.get(hindsightAcknowledgedAtom)).toBe(enabled ? 'convo-1' : null);
+    expect(api.getAgentById).not.toHaveBeenCalled();
+  });
+
+  it('withdraws the confirmation when the switch unmounts', async () => {
+    api.getHindsightConsent.mockResolvedValue({ available: true, enabled: true });
+    const { jotai, unmount } = setup();
+    await waitFor(() => expect(jotai.get(hindsightAcknowledgedAtom)).toBe('convo-1'));
+    unmount();
+    expect(jotai.get(hindsightAcknowledgedAtom)).toBeNull();
+  });
+});

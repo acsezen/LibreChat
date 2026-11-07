@@ -100,6 +100,9 @@ export enum QueryKeys {
   subagentThread = 'subagentThread',
   backgroundTasks = 'backgroundTasks',
   codeEnvironments = 'codeEnvironments',
+  /* Hindsight per-conversation memory */
+  hindsightAvailability = 'hindsightAvailability',
+  hindsightConsent = 'hindsightConsent',
   agentQueuedTurns = 'agentQueuedTurns',
   /* Combined Pinned-section display order (favorites + pinned chats) */
   pinnedOrder = 'pinnedOrder',
@@ -113,6 +116,7 @@ export const DynamicQueryKeys = {
 
 export enum MutationKeys {
   subagentControl = 'subagentControl',
+  updateHindsightConsent = 'updateHindsightConsent',
   cancelBackgroundTasks = 'cancelBackgroundTasks',
   enqueueAgentQueuedTurn = 'enqueueAgentQueuedTurn',
   cancelAgentQueuedTurn = 'cancelAgentQueuedTurn',

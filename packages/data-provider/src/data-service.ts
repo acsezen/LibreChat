@@ -1587,6 +1587,22 @@ export function verifyTwoFactorTemp(
   return request.post(endpoints.verifyTwoFactorTemp(), payload);
 }
 
+/* Hindsight per-conversation memory */
+export const getHindsightAvailability = (): Promise<t.THindsightAvailability> => {
+  return request.get(endpoints.hindsightAvailability());
+};
+
+export const getHindsightConsent = (conversationId: string): Promise<t.THindsightConsent> => {
+  return request.get(endpoints.hindsightConsent(conversationId));
+};
+
+export const updateHindsightConsent = (
+  conversationId: string,
+  enabled: boolean,
+): Promise<t.THindsightConsentUpdate> => {
+  return request.put(endpoints.hindsightConsent(conversationId), { enabled });
+};
+
 /* Memories */
 export const getMemories = (): Promise<q.MemoriesResponse> => {
   return request.get(endpoints.memories());
