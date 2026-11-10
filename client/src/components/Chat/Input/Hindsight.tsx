@@ -14,17 +14,18 @@ interface HindsightProps extends HindsightSurface {
 }
 
 /**
- * Per-chat Hindsight memory switch. Model chats switch it from the Tools menu
- * and show it while On; saved-agent chats have no Tools menu, so there it is
- * always shown. A plain switch rather than `CheckboxButton`, whose internal
- * store flips on click before the server confirms the change. Only this
- * rendered control can confirm On for a submission.
+ * A model chat's per-chat Hindsight memory switch: turned on from the Tools
+ * menu and shown while On, like LibreChat's other model-chat tool badges.
+ * Saved agents have none (their Tool Library entry is always on). A plain
+ * switch rather than `CheckboxButton`, whose internal store flips on click
+ * before the server confirms the change. Only this rendered control can
+ * confirm On for a submission.
  */
 function Hindsight({ isSubmitting, ...surface }: HindsightProps) {
   const localize = useLocalize();
   const setAcknowledged = useSetAtom(hindsightAcknowledgedAtom);
   const { key, shown, enabled, pending, unconfirmed, setEnabled } = useHindsightConsent(surface);
-  const visible = shown && (surface.kind === 'agent' || enabled || pending);
+  const visible = shown && (enabled || pending);
   const acknowledged = visible && enabled && !pending;
 
   useEffect(() => {

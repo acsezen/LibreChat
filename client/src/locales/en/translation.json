@@ -196,7 +196,7 @@
   "com_agents_file_context_label": "File Context",
   "com_agents_file_search_disabled": "Agent must be created before uploading files for File Search.",
   "com_agents_file_search_info": "Turns uploaded files into a searchable knowledge base. The agent retrieves the most relevant passages on demand, so it works well even with large document sets.",
-  "com_agents_hindsight_info": "Lets this agent use your private Hindsight memory in chats where you switch Hindsight on. Every chat starts with it off.",
+  "com_agents_hindsight_info": "Recalls your private Hindsight memory and saves every chat with this agent to it. Use a temporary chat to keep a conversation out.",
   "com_agents_grid_announcement": "Showing {{count}} agents in {{category}} category",
   "com_agents_instructions_placeholder": "The system instructions that the agent uses",
   "com_agents_link_copied": "Link copied",

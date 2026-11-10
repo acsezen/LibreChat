@@ -6720,6 +6720,7 @@ describe('ResumableAgentController resume metadata', () => {
         enabled: false,
         consentVersion: 1,
         capableAgentIds: [],
+        basis: 'consent',
       });
       /** Admission fences the chat with an Off row; only a toggle or a new chat's choice stores On. */
       expect(await consents().findOne({}, { projection: { _id: 0, enabled: 1 } })).toEqual({
@@ -6762,10 +6763,52 @@ describe('ResumableAgentController resume metadata', () => {
       expect(await pendingJobs()).toBe(0);
     });
 
-    it('uses Hindsight on a saved agent whose server-loaded tools carry the entry', async () => {
-      await storeConsent('convo-consent');
-      const turn = await runTurn({ ephemeral: false, agentTools: ['web_search', 'hindsight'] });
+    /** A saved agent's page has no switch, so it sends no flag. */
+    const savedAgent = {
+      ephemeral: false,
+      agentTools: ['web_search', 'hindsight'],
+      acknowledged: undefined,
+    };
+
+    it('runs Hindsight in every chat with a saved agent carrying the entry, without the switch', async () => {
+      const turn = await runTurn(savedAgent);
       expect(turn.context()).toEqual(expect.objectContaining({ status: 'available' }));
+      expect(paths().filter((url) => url.endsWith('/memories/recall'))).toHaveLength(1);
+      expect(await pendingJobs()).toBe(1);
+      expect(await turns().findOne({})).toEqual(
+        expect.objectContaining({
+          enabled: true,
+          basis: 'agent',
+          capableAgentIds: ['agent_saved'],
+        }),
+      );
+      expect(await consents().countDocuments({ enabled: true })).toBe(0);
+    });
+
+    it.each([
+      ['a scheduled run', { requestOverrides: { _isScheduledFire: true } }],
+      ['another user', { userId: 'someone-else' }],
+      ['a temporary chat', { bodyOverrides: { isTemporary: true } }],
+    ])("keeps a saved agent's Hindsight Off for %s", async (_label, options) => {
+      const turn = await runTurn({ ...savedAgent, ...options });
+      expect(turn.context()).toBeUndefined();
+      expect(backendRequests).toEqual([]);
+      expect(await pendingJobs()).toBe(0);
+    });
+
+    it("keeps a saved agent's entry inert while LibreChat's tools capability is off", async () => {
+      const turn = await runTurn({
+        ...savedAgent,
+        requestOverrides: {
+          config: {
+            endpoints: { agents: { capabilities: ['web_search'] } },
+            config: { hindsight: config() },
+          },
+        },
+      });
+      expect(turn.context()).toBeUndefined();
+      expect(backendRequests).toEqual([]);
+      expect(await pendingJobs()).toBe(0);
     });
 
     it("persists a new chat's first-turn On choice before any Hindsight request", async () => {
