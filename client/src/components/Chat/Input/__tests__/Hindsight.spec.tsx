@@ -7,8 +7,8 @@ import { act, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import type { HindsightSurface } from '~/hooks/Hindsight/useHindsightConsent';
-import { hindsightKind } from '~/hooks/Hindsight/useHindsightConsent';
 import { hindsightAcknowledgedAtom, hindsightDraftAtom } from '~/store/hindsight';
+import { hindsightKind } from '~/hooks/Hindsight/useHindsightConsent';
 import Hindsight from '../Hindsight';
 import store from '~/store';
 

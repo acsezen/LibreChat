@@ -273,15 +273,17 @@ let generation = 1762500000000;
  * Mirrors request.js for an On turn: stored consent, the page's confirmation and
  * a capable primary (bound as initialize.js does unless the caller already did).
  */
-async function admitRequest(req, agent, { bind = true } = {}) {
+async function admitRequest(req, agent, { bind = true, consent = true } = {}) {
   const conversationId = req.body.conversationId ?? 'conv_dispatch';
-  await mongoose.connection.db
-    .collection('hindsightconsents')
-    .updateOne(
-      { user: req.user.id, conversationId },
-      { $setOnInsert: { enabled: true, version: 1, fence: 0 } },
-      { upsert: true },
-    );
+  if (consent) {
+    await mongoose.connection.db
+      .collection('hindsightconsents')
+      .updateOne(
+        { user: req.user.id, conversationId },
+        { $setOnInsert: { enabled: true, version: 1, fence: 0 } },
+        { upsert: true },
+      );
+  }
   if (bind) {
     hindsightMemory.bindAgent(req, agent, null, true);
   }
@@ -294,7 +296,8 @@ async function admitRequest(req, agent, { bind = true } = {}) {
     generation: generation++,
     interactive: true,
     temporary: false,
-    acknowledged: true,
+    /** A saved agent's page has no switch and sends no flag. */
+    acknowledged: consent ? true : undefined,
   });
   await hindsightMemory.admit(pending, { options: { agent } });
 }
@@ -309,8 +312,9 @@ async function bindRequest({
   signal,
   inspect = jest.fn(),
   bind = true,
+  consent = true,
 } = {}) {
-  await admitRequest(req, agent, { bind });
+  await admitRequest(req, agent, { bind, consent });
   await hindsightMemory.prepare({
     request: req,
     config: req.config.config.hindsight,
@@ -860,6 +864,19 @@ describe('initialize.js composes the public loader before building handlers', ()
     });
     expect(executed.status).toBe('success');
     expect(String(executed.content)).toContain(MARKER);
+  });
+
+  it("runs a saved agent's entry without the chat switch, as initialize.js binds it", async () => {
+    const req = initializeRequest();
+    const runtimeAgent = await initialize(req);
+    await bindRequest({ req, agent: runtimeAgent, bind: false, consent: false });
+
+    expect(runtimeAgent.tools.map((tool) => tool.name)).toContain('hindsight_recall');
+    const result = await mockLoadToolsAtHandlerBuild(['hindsight_recall'], PRIMARY_ID);
+    expect(result.loadedTools.map((loaded) => loaded.name)).toEqual(['hindsight_recall']);
+    expect(await mongoose.connection.db.collection('hindsightturns').findOne({})).toEqual(
+      expect.objectContaining({ enabled: true, basis: 'agent', capableAgentIds: [PRIMARY_ID] }),
+    );
   });
 
   it('leaves the Hindsight entry inert while the tools capability is off, like a plugin', async () => {
