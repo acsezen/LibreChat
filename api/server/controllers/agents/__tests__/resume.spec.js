@@ -4441,6 +4441,10 @@ describe('ResumeAgentController (POST /agents/chat/resume)', () => {
       await mongoose.connection.dropDatabase();
       outboxDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'hindsight-resume-'));
       requestConfigOverrides = {
+        /** LibreChat fills in the agents capabilities; `tools` is on by default. */
+        endpoints: {
+          agents: { checkpointer: { type: 'mongo' }, capabilities: [AgentCapabilities.tools] },
+        },
         config: {
           hindsight: {
             enabled: true,

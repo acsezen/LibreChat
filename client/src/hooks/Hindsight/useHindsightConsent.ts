@@ -2,7 +2,12 @@ import { useCallback } from 'react';
 import { useAtom } from 'jotai';
 import { useRecoilValue } from 'recoil';
 import { useToastContext } from '@librechat/client';
-import { Constants, isAgentsEndpoint, isAssistantsEndpoint } from 'librechat-data-provider';
+import {
+  Constants,
+  AgentCapabilities,
+  isAgentsEndpoint,
+  isAssistantsEndpoint,
+} from 'librechat-data-provider';
 import {
   useGetAgentByIdQuery,
   useHindsightConsentQuery,
@@ -11,7 +16,7 @@ import {
   useUpdateHindsightConsentMutation,
 } from '~/data-provider';
 import { hindsightDraftAtom } from '~/store/hindsight';
-import { useLocalize } from '~/hooks';
+import { useGetAgentsConfig, useLocalize } from '~/hooks';
 import store from '~/store';
 
 /** The Tool Library entry that makes a saved agent Hindsight-capable. */
@@ -57,7 +62,11 @@ export default function useHindsightConsent({
   const agent = useGetAgentByIdQuery(agentId, {
     enabled: eligible && kind === 'agent' && !!agentId,
   });
-  const capable = kind === 'agent' ? agent.data?.tools?.includes(HINDSIGHT_TOOL) === true : true;
+  const { agentsConfig } = useGetAgentsConfig();
+  /** Like a plugin, the agent entry follows the `tools` capability; the server applies the same gate. */
+  const toolsEnabled = agentsConfig?.capabilities?.includes(AgentCapabilities.tools) === true;
+  const capable =
+    kind === 'agent' ? toolsEnabled && agent.data?.tools?.includes(HINDSIGHT_TOOL) === true : true;
   const supported = eligible && capable;
   const consent = useHindsightConsentQuery(key, supported && !isNew);
   const mutation = useUpdateHindsightConsentMutation(key);

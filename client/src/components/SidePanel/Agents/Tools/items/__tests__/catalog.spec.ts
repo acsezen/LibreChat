@@ -300,12 +300,18 @@ describe('buildCatalog', () => {
     expect(items.map((i) => i.kind)).toEqual(['builtin', 'mcp', 'tool', 'skill', 'action']);
   });
 
+  const hindsight = (items: ReturnType<typeof buildCatalog>) =>
+    items.find((i) => i.kind === 'builtin' && i.id === 'hindsight');
+
+  test('hides Hindsight from its owner while the tools capability is off, like plugins', () => {
+    expect(hindsight(buildCatalog({ ...emptyInputs, showHindsight: true }))).toBeUndefined();
+    expect(hindsight(buildCatalog({ ...askInputs, showHindsight: true }))).toBeUndefined();
+  });
+
   test('offers Hindsight as a builtin only to its owner', () => {
-    const hindsight = (items: ReturnType<typeof buildCatalog>) =>
-      items.find((i) => i.kind === 'builtin' && i.id === 'hindsight');
-    expect(hindsight(buildCatalog(emptyInputs))).toBeUndefined();
-    expect(hindsight(buildCatalog({ ...emptyInputs, showHindsight: false }))).toBeUndefined();
-    expect(hindsight(buildCatalog({ ...emptyInputs, showHindsight: true }))).toEqual({
+    expect(hindsight(buildCatalog(toolInputs))).toBeUndefined();
+    expect(hindsight(buildCatalog({ ...toolInputs, showHindsight: false }))).toBeUndefined();
+    expect(hindsight(buildCatalog({ ...toolInputs, showHindsight: true }))).toEqual({
       kind: 'builtin',
       id: 'hindsight',
       iconKey: 'hindsight',

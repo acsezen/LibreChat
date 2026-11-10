@@ -6646,7 +6646,11 @@ describe('ResumableAgentController resume metadata', () => {
           ...(acknowledged !== undefined && { hindsightMemory: acknowledged }),
           ...bodyOverrides,
         },
-        config: { config: { hindsight: config() } },
+        config: {
+          /** LibreChat fills in the agents capabilities; `tools` is on by default. */
+          endpoints: { agents: { capabilities: ['tools'] } },
+          config: { hindsight: config() },
+        },
         ...requestOverrides,
       };
       const initializeClient = jest.fn(async ({ req: initReq }) => {
