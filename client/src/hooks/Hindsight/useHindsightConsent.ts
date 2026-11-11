@@ -2,39 +2,33 @@ import { useCallback } from 'react';
 import { useAtom } from 'jotai';
 import { useRecoilValue } from 'recoil';
 import { useToastContext } from '@librechat/client';
+import { Constants, isAgentsEndpoint, isAssistantsEndpoint } from 'librechat-data-provider';
 import {
-  Constants,
-  AgentCapabilities,
-  isAgentsEndpoint,
-  isAssistantsEndpoint,
-} from 'librechat-data-provider';
-import {
-  useGetAgentByIdQuery,
   useHindsightConsentQuery,
   useHindsightConsentChanging,
   useHindsightAvailabilityQuery,
   useUpdateHindsightConsentMutation,
 } from '~/data-provider';
 import { hindsightDraftAtom } from '~/store/hindsight';
-import { useGetAgentsConfig, useLocalize } from '~/hooks';
+import { useLocalize } from '~/hooks';
 import store from '~/store';
 
-/** The Tool Library entry that makes a saved agent Hindsight-capable. */
-const HINDSIGHT_TOOL = 'hindsight';
-
-/** Which composer surface an endpoint is: saved agents, plain model chats, or unsupported. */
+/**
+ * Only plain model chats have the per-chat switch. A saved agent's Hindsight
+ * is its Tool Library entry, on in every chat like its other tools, so agent
+ * chats (like assistants) have no composer control.
+ */
 export function hindsightKind(endpoint?: string | null): HindsightSurface['kind'] {
-  if (!endpoint || isAssistantsEndpoint(endpoint)) {
+  if (!endpoint || isAssistantsEndpoint(endpoint) || isAgentsEndpoint(endpoint)) {
     return null;
   }
-  return isAgentsEndpoint(endpoint) ? 'agent' : 'model';
+  return 'model';
 }
 
 export interface HindsightSurface {
   conversationId?: string | null;
-  /** `model` for plain model chats, `agent` for saved agents, null where unsupported. */
-  kind: 'model' | 'agent' | null;
-  agentId?: string | null;
+  /** `model` for plain model chats, null where the composer has no switch. */
+  kind: 'model' | null;
   /** Model specs that hide the badge row never show the control. */
   hidden: boolean;
 }
@@ -44,12 +38,7 @@ export interface HindsightSurface {
  * server-confirmed value; a new chat holds its own in-memory draft until its
  * first message. The server makes the final decision either way.
  */
-export default function useHindsightConsent({
-  conversationId,
-  kind,
-  agentId,
-  hidden,
-}: HindsightSurface) {
+export default function useHindsightConsent({ conversationId, kind, hidden }: HindsightSurface) {
   const localize = useLocalize();
   const { showToast } = useToastContext();
   const isTemporary = useRecoilValue(store.isTemporary);
@@ -58,16 +47,7 @@ export default function useHindsightConsent({
   const isNew = key === Constants.NEW_CONVO;
   const availability = useHindsightAvailabilityQuery();
   const available = availability.data?.available === true;
-  const eligible = available && kind != null && !hidden && !isTemporary;
-  const agent = useGetAgentByIdQuery(agentId, {
-    enabled: eligible && kind === 'agent' && !!agentId,
-  });
-  const { agentsConfig } = useGetAgentsConfig();
-  /** Like a plugin, the agent entry follows the `tools` capability; the server applies the same gate. */
-  const toolsEnabled = agentsConfig?.capabilities?.includes(AgentCapabilities.tools) === true;
-  const capable =
-    kind === 'agent' ? toolsEnabled && agent.data?.tools?.includes(HINDSIGHT_TOOL) === true : true;
-  const supported = eligible && capable;
+  const supported = available && kind != null && !hidden && !isTemporary;
   const consent = useHindsightConsentQuery(key, supported && !isNew);
   const mutation = useUpdateHindsightConsentMutation(key);
   /** Shared by every control: a change started from the Tools menu also holds the badge. */

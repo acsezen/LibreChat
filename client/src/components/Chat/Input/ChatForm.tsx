@@ -882,7 +882,6 @@ const ChatForm = memo(function ChatForm({
                   <Hindsight
                     conversationId={conversationId}
                     kind={hindsightKind(endpoint)}
-                    agentId={conversation?.agent_id}
                     hidden={hideBadgeRow}
                     isSubmitting={isSubmitting}
                   />

@@ -4489,8 +4489,11 @@ describe('ResumeAgentController (POST /agents/chat/resume)', () => {
       }
     }
 
-    /** Seed what request.js recorded when the paused turn started. */
-    async function recordPausedTurn({ enabled = true, capableAgentIds = [AGENT_ID] } = {}) {
+    /**
+     * Seed what request.js recorded when the paused turn started. Without `basis`
+     * the record is one written before the basis existed, read as per-chat consent.
+     */
+    async function recordPausedTurn({ enabled = true, capableAgentIds = [AGENT_ID], basis } = {}) {
       await db().collection('hindsightconsents').insertOne({
         user: USER_ID,
         conversationId: CONVO_ID,
@@ -4498,14 +4501,17 @@ describe('ResumeAgentController (POST /agents/chat/resume)', () => {
         version: 1,
         fence: 1,
       });
-      await db().collection('hindsightturns').insertOne({
-        user: USER_ID,
-        conversationId: CONVO_ID,
-        generation: '1000',
-        enabled,
-        consentVersion: 1,
-        capableAgentIds,
-      });
+      await db()
+        .collection('hindsightturns')
+        .insertOne({
+          user: USER_ID,
+          conversationId: CONVO_ID,
+          generation: '1000',
+          enabled,
+          consentVersion: 1,
+          capableAgentIds,
+          ...(basis && { basis }),
+        });
     }
 
     async function resumeWith(agentTools) {
@@ -4540,6 +4546,24 @@ describe('ResumeAgentController (POST /agents/chat/resume)', () => {
     ])('stays Off for %s', async (_label, seed, agentTools) => {
       await seed();
       await resumeWith(agentTools);
+      expect(await pendingJobs()).toBe(0);
+    });
+
+    it("captures a saved agent's resumed answer whatever the chat's switch did during the pause", async () => {
+      await recordPausedTurn({ basis: 'agent' });
+      await db()
+        .collection('hindsightconsents')
+        .updateOne(
+          { conversationId: CONVO_ID },
+          { $set: { enabled: false }, $inc: { version: 1 } },
+        );
+      await resumeWith(['hindsight']);
+      expect(await pendingJobs()).toBe(1);
+    });
+
+    it("stays Off for a saved agent's turn when the agent lost the entry during the pause", async () => {
+      await recordPausedTurn({ basis: 'agent' });
+      await resumeWith(['web_search']);
       expect(await pendingJobs()).toBe(0);
     });
 
