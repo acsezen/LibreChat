@@ -7,7 +7,11 @@ import { act, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import type { HindsightSurface } from '~/hooks/Hindsight/useHindsightConsent';
-import { hindsightAcknowledgedAtom, hindsightDraftAtom } from '~/store/hindsight';
+import {
+  hindsightAcknowledgedAtom,
+  hindsightDraftAtom,
+  hindsightPinnedAtom,
+} from '~/store/hindsight';
 import { hindsightKind } from '~/hooks/Hindsight/useHindsightConsent';
 import Hindsight from '../Hindsight';
 import store from '~/store';
@@ -40,13 +44,16 @@ const api = jest.mocked(dataService);
 
 function setup(
   surface: Partial<HindsightSurface> = {},
-  { isSubmitting = false, temporary = false, draft = false } = {},
+  { isSubmitting = false, temporary = false, draft = false, pinned = false } = {},
 ) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   const jotai = createStore();
   jotai.set(hindsightDraftAtom, draft);
+  if (pinned) {
+    jotai.set(hindsightPinnedAtom, true);
+  }
   const wrapper = ({ children }: { children: ReactNode }) => (
     <RecoilRoot initializeState={({ set }) => set(store.isTemporary, temporary)}>
       <QueryClientProvider client={queryClient}>
@@ -186,9 +193,9 @@ describe('Hindsight composer switch', () => {
       {},
       {},
     ],
-  ] as const)('renders nothing when %s', async (_label, arrange, surface, options) => {
+  ] as const)('renders nothing when %s, even pinned', async (_label, arrange, surface, options) => {
     arrange();
-    const { jotai } = setup(surface as Partial<HindsightSurface>, options);
+    const { jotai } = setup(surface as Partial<HindsightSurface>, { ...options, pinned: true });
     await waitFor(() => expect(api.getHindsightAvailability).toHaveBeenCalled());
     await settle();
     expect(screen.queryByTestId('hindsight-badge')).toBeNull();
@@ -213,6 +220,36 @@ describe('Hindsight composer switch', () => {
     await settle();
     expect(screen.queryAllByTestId('hindsight-badge')).toHaveLength(count);
     expect(jotai.get(hindsightAcknowledgedAtom)).toBe(enabled ? 'convo-1' : null);
+  });
+
+  it('keeps a pinned switch in the composer while Off, without confirming it', async () => {
+    api.getHindsightConsent.mockResolvedValue({ available: true, enabled: false });
+    api.updateHindsightConsent.mockResolvedValue({ enabled: true });
+    const { jotai } = setup({}, { pinned: true });
+    const toggle = await screen.findByTestId('hindsight-badge');
+    await waitFor(() => expect(toggle).not.toBeDisabled());
+    expect(toggle).toHaveAttribute('aria-checked', 'false');
+    expect(jotai.get(hindsightAcknowledgedAtom)).toBeNull();
+
+    await userEvent.click(toggle);
+
+    expect(api.updateHindsightConsent).toHaveBeenCalledWith('convo-1', true);
+    await waitFor(() => expect(toggle).toHaveAttribute('aria-checked', 'true'));
+    expect(jotai.get(hindsightAcknowledgedAtom)).toBe('convo-1');
+  });
+
+  it('keeps a pinned switch in a new chat while Off and turns on only its draft', async () => {
+    const { jotai } = setup({ conversationId: Constants.NEW_CONVO as string }, { pinned: true });
+    const toggle = await screen.findByTestId('hindsight-badge');
+    expect(toggle).toHaveAttribute('aria-checked', 'false');
+    expect(jotai.get(hindsightAcknowledgedAtom)).toBeNull();
+
+    await userEvent.click(toggle);
+
+    expect(jotai.get(hindsightDraftAtom)).toBe(true);
+    expect(toggle).toHaveAttribute('aria-checked', 'true');
+    expect(jotai.get(hindsightAcknowledgedAtom)).toBe(Constants.NEW_CONVO);
+    expect(api.updateHindsightConsent).not.toHaveBeenCalled();
   });
 
   it('withdraws the confirmation when the switch unmounts', async () => {

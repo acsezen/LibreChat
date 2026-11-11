@@ -1,10 +1,10 @@
 import React, { memo, useEffect } from 'react';
-import { useSetAtom } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai';
 import { History } from 'lucide-react';
 import { composerControlClasses } from '@librechat/client';
 import type { HindsightSurface } from '~/hooks/Hindsight/useHindsightConsent';
 import useHindsightConsent from '~/hooks/Hindsight/useHindsightConsent';
-import { hindsightAcknowledgedAtom } from '~/store/hindsight';
+import { hindsightAcknowledgedAtom, hindsightPinnedAtom } from '~/store/hindsight';
 import { badgeAccents } from './accents';
 import { useLocalize } from '~/hooks';
 import { cn } from '~/utils';
@@ -15,7 +15,8 @@ interface HindsightProps extends HindsightSurface {
 
 /**
  * A model chat's per-chat Hindsight memory switch: turned on from the Tools
- * menu and shown while On, like LibreChat's other model-chat tool badges.
+ * menu and shown while On or pinned, like LibreChat's other model-chat tool
+ * badges.
  * Saved agents have none (their Tool Library entry is always on). A plain
  * switch rather than `CheckboxButton`, whose internal store flips on click
  * before the server confirms the change. Only this rendered control can
@@ -24,8 +25,9 @@ interface HindsightProps extends HindsightSurface {
 function Hindsight({ isSubmitting, ...surface }: HindsightProps) {
   const localize = useLocalize();
   const setAcknowledged = useSetAtom(hindsightAcknowledgedAtom);
+  const pinned = useAtomValue(hindsightPinnedAtom);
   const { key, shown, enabled, pending, unconfirmed, setEnabled } = useHindsightConsent(surface);
-  const visible = shown && (enabled || pending);
+  const visible = shown && (enabled || pending || pinned);
   const acknowledged = visible && enabled && !pending;
 
   useEffect(() => {

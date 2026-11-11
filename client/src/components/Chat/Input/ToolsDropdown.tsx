@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useCallback } from 'react';
+import { useAtom } from 'jotai';
 import * as Ariakit from '@ariakit/react';
 import { TooltipAnchor, DropdownPopup, PinIcon, VectorIcon } from '@librechat/client';
 import {
@@ -26,6 +27,7 @@ import {
   useAgentCapabilities,
 } from '~/hooks';
 import useHindsightConsent from '~/hooks/Hindsight/useHindsightConsent';
+import { hindsightPinnedAtom } from '~/store/hindsight';
 import ArtifactsSubMenu from '~/components/Chat/Input/ArtifactsSubMenu';
 import MCPSubMenu from '~/components/Chat/Input/MCPSubMenu';
 import { useGetStartupConfig } from '~/data-provider';
@@ -88,6 +90,8 @@ const ToolsDropdown = ({ disabled }: ToolsDropdownProps) => {
     kind: 'model',
     hidden: false,
   });
+  /** Pinned keeps the Hindsight badge in the composer while Off, like the other tools' pins. */
+  const [isHindsightPinned, setIsHindsightPinned] = useAtom(hindsightPinnedAtom);
 
   const [isPopoverActive, setIsPopoverActive] = useState(false);
   const isDisabled = disabled ?? false;
@@ -338,9 +342,23 @@ const ToolsDropdown = ({ disabled }: ToolsDropdownProps) => {
             <History className="icon-md" aria-hidden="true" />
             <span>{localize('com_ui_hindsight')}</span>
           </div>
-          <span className="text-xs text-text-secondary" aria-live="polite">
-            {localize(hindsight.enabled ? 'com_ui_on' : 'com_ui_off')}
-          </span>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setIsHindsightPinned(!isHindsightPinned);
+            }}
+            className={cn(
+              'rounded p-1 transition-all duration-200',
+              'hover:bg-surface-secondary hover:shadow-sm',
+              !isHindsightPinned && 'text-text-secondary hover:text-text-primary',
+            )}
+            aria-label={isHindsightPinned ? 'Unpin' : 'Pin'}
+          >
+            <div className="h-4 w-4">
+              <PinIcon unpin={isHindsightPinned} />
+            </div>
+          </button>
         </div>
       ),
     });
