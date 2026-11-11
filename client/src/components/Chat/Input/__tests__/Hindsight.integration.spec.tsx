@@ -73,6 +73,7 @@ jest.mock('~/hooks', () => ({
   useAuthContext: () => ({ user: { id: 'owner' } }),
   useHasMemoryAccess: () => false,
   useAgentCapabilities: () => ({}),
+  useGetAgentsConfig: () => ({ agentsConfig: { capabilities: ['tools'] } }),
 }));
 
 jest.mock('~/Providers', () => ({

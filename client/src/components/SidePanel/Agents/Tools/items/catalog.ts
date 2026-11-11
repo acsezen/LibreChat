@@ -178,7 +178,8 @@ export function buildCatalog(inputs: BuildCatalogInputs): AgentItem[] {
     });
   }
 
-  if (inputs.showHindsight) {
+  /** Like a plugin, the entry follows the generic `tools` capability; the server applies the same gate. */
+  if (inputs.showHindsight && enabled.has(AgentCapabilities.tools)) {
     items.push({
       kind: 'builtin',
       id: 'hindsight',

@@ -12,6 +12,8 @@ import Hindsight from '../Hindsight';
 import store from '~/store';
 
 const mockShowToast = jest.fn();
+/** The agents endpoint's capabilities, as LibreChat serves them; `tools` is on by default. */
+let mockAgentCapabilities: string[] = ['tools'];
 
 jest.mock('librechat-data-provider', () => {
   const actual = jest.requireActual('librechat-data-provider');
@@ -34,6 +36,7 @@ jest.mock('@librechat/client', () => ({
 
 jest.mock('~/hooks', () => ({
   useLocalize: () => (key: string) => key,
+  useGetAgentsConfig: () => ({ agentsConfig: { capabilities: mockAgentCapabilities } }),
 }));
 
 const api = jest.mocked(dataService);
@@ -69,6 +72,7 @@ describe('Hindsight composer switch', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     localStorage.clear();
+    mockAgentCapabilities = ['tools'];
     api.getHindsightAvailability.mockResolvedValue({ available: true });
     api.getHindsightConsent.mockResolvedValue({ available: true, enabled: false });
     api.getAgentById.mockResolvedValue({ id: 'agent_1', tools: ['hindsight'] } as never);
@@ -179,6 +183,18 @@ describe('Hindsight composer switch', () => {
     const { jotai } = setup(surface as Partial<HindsightSurface>, options);
     await waitFor(() => expect(api.getHindsightAvailability).toHaveBeenCalled());
     await act(async () => undefined);
+    expect(screen.queryByTestId('hindsight-badge')).toBeNull();
+    expect(jotai.get(hindsightAcknowledgedAtom)).toBeNull();
+  });
+
+  it("hides the agent switch while LibreChat's tools capability is off, as the server ignores the entry", async () => {
+    mockAgentCapabilities = ['web_search'];
+    const { jotai } = setup();
+    await waitFor(() => expect(api.getAgentById).toHaveBeenCalled());
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(api.getHindsightConsent).not.toHaveBeenCalled();
     expect(screen.queryByTestId('hindsight-badge')).toBeNull();
     expect(jotai.get(hindsightAcknowledgedAtom)).toBeNull();
   });

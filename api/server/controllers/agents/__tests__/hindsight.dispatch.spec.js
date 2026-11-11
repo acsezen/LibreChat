@@ -26,7 +26,7 @@ const { tool } = require('@langchain/core/tools');
 const { HumanMessage } = require('@langchain/core/messages');
 const { DynamicStructuredTool } = require('@librechat/agents/langchain/tools');
 const { Run, Providers, FakeChatModel } = require('@librechat/agents');
-const { Constants } = require('librechat-data-provider');
+const { Constants, AgentCapabilities } = require('librechat-data-provider');
 
 const mockInitializeAgent = jest.fn();
 const mockValidateAgentModel = jest.fn();
@@ -826,12 +826,16 @@ describe('initialize.js composes the public loader before building handlers', ()
     return mockAgentClientArgs.agent;
   }
 
-  function initializeRequest() {
+  /** The app config always carries the agents capabilities (LibreChat fills in defaults). */
+  function initializeRequest(capabilities = [AgentCapabilities.tools]) {
     return {
       user: { id: ownerId, role: 'USER' },
       body: { conversationId: 'conv_hindsight', files: [] },
       resolvedConversation: null,
-      config: { endpoints: {}, config: { hindsight: hindsightConfig(ownerId) } },
+      config: {
+        endpoints: { agents: { capabilities } },
+        config: { hindsight: hindsightConfig(ownerId) },
+      },
       _resumableStreamId: null,
     };
   }
@@ -856,6 +860,17 @@ describe('initialize.js composes the public loader before building handlers', ()
     });
     expect(executed.status).toBe('success');
     expect(String(executed.content)).toContain(MARKER);
+  });
+
+  it('leaves the Hindsight entry inert while the tools capability is off, like a plugin', async () => {
+    const req = initializeRequest([AgentCapabilities.web_search]);
+    const runtimeAgent = await initialize(req);
+    await bindRequest({ req, agent: runtimeAgent, bind: false, allowed: false });
+
+    expect(runtimeAgent.tools).toEqual([]);
+    const result = await mockLoadToolsAtHandlerBuild(['hindsight_recall'], PRIMARY_ID);
+    expect(result.loadedTools).toEqual([]);
+    expect(backendCalls('/memories/recall')).toHaveLength(0);
   });
 
   it('binds only a primary whose server-loaded tools carry the Hindsight entry', async () => {
